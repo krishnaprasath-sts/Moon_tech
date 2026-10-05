@@ -1,0 +1,14 @@
+{
+  "name": "moon-tech-backend-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Moon Tech Solutions Backend Workspace",
+  "scripts": {
+    "dev": "npm --prefix node run dev",
+    "dev:node": "npm --prefix node run dev",
+    "dev:panel": "npm --prefix panel run dev",
+    "build": "npm --prefix node run build && npm --prefix panel run build",
+    "migrate": "npm --prefix node run migrate",
+    "seed": "npm --prefix node run seed"
+  }
+}

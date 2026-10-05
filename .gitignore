@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+*/node_modules/
+*/*/node_modules/
+.pnp
+.pnp.js
+
+# Environment variables & secrets
+.env
+.env.*
+*.env
+!*.env.example
+!.env.example
+
+# Build & compiled outputs
+dist/
+*/dist/
+build/
+*/build/
+.next/
+*/.next/
+out/
+*/out/
+*.tsbuildinfo
+next-env.d.ts
+
+# User uploads & KYC storage (preserve sample document and gitkeep)
+backend/node/storage/kyc_documents/*
+!backend/node/storage/kyc_documents/.gitkeep
+!backend/node/storage/kyc_documents/sample_kyc_document.jpg
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+
+# Editor & OS files
+.DS_Store
+Thumbs.db
+*.pem
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

@@ -1,0 +1,12 @@
+{
+  "name": "moon-tech-solutions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Moon Tech Solutions Stock Market Investment Platform",
+  "scripts": {
+    "dev:backend": "npm --prefix backend/node run dev",
+    "dev:node": "npm --prefix backend/node run dev",
+    "dev:panel": "npm --prefix backend/panel run dev",
+    "dev:frontend": "npm --prefix frontend run dev"
+  }
+}

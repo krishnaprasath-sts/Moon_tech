@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">
+        <rect width="800" height="500" fill="#1e293b"/>
+        <rect x="20" y="20" width="760" height="460" rx="12" fill="#0f172a" stroke="#3b62f2" stroke-width="2"/>
+        <text x="400" y="80" fill="#60a5fa" font-size="24" font-family="Arial" text-anchor="middle" font-weight="bold">GOVERNMENT OF INDIA / OFFICIAL DOCUMENT</text>
+        <line x1="100" y1="110" x2="700" y2="110" stroke="#334155" stroke-width="2"/>
+        <text x="100" y="180" fill="#94a3b8" font-size="18" font-family="Arial">Name / Name of Holder:</text>
+        <text x="350" y="180" fill="#f8fafc" font-size="20" font-family="Arial" font-weight="bold">SAMPLE CITIZEN</text>
+        <text x="100" y="240" fill="#94a3b8" font-size="18" font-family="Arial">Identity / Account Reference:</text>
+        <text x="350" y="240" fill="#38bdf8" font-size="20" font-family="monospace">XXXX-XXXX-1234</text>
+        <text x="100" y="300" fill="#94a3b8" font-size="18" font-family="Arial">Issuing Authority / Bank:</text>
+        <text x="350" y="300" fill="#f8fafc" font-size="18" font-family="Arial">MOON TECH VERIFIED RECORD</text>
+        <rect x="100" y="360" width="600" height="70" rx="8" fill="#1e1b4b" stroke="#6366f1" stroke-width="1"/>
+        <text x="400" y="405" fill="#a5b4fc" font-size="16" font-family="Arial" text-anchor="middle">Confidential Document — Strictly Protected under Moon Tech Security Architecture</text>
+      </svg>
