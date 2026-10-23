@@ -3,7 +3,7 @@
 import React, { Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, ArrowRight, CalendarClock, CheckCircle2, ShieldAlert, TrendingUp, Wallet } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CalendarClock, CheckCircle2, Landmark, ShieldAlert, TrendingUp, Wallet } from 'lucide-react';
 import {
   api,
   getErrorMessage,
@@ -11,12 +11,25 @@ import {
   InvestmentPlan,
   InvestmentPreview,
   loginUrl,
+  WalletBucket,
   WalletSummary,
 } from '@/lib/api';
 import { useAuth } from '@/lib/useAuth';
 import { useAsyncData } from '@/lib/useAsyncData';
 import {
+  BUCKET_LABELS,
+  capitalFeeFor,
   estimateProfit,
+  dailyProfitFor,
+  weeklyProfitFor,
+  monthlyProfitFor,
+  isDailyPlan,
+  isOpenEndedPlan,
+  lockInDescription,
+  payoutDescription,
+  profitCaption,
+  termSummary,
+  PAYOUT_TIME_LABEL,
   exampleAmount,
   formatDate,
   formatDuration,
@@ -59,7 +72,8 @@ export default function PlansPage() {
 function PlansContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { token, loading: authLoading } = useAuth({ required: false });
+  // Investment plans are only shown to signed-in customers
+  const { token, loading: authLoading } = useAuth();
 
   // undefined = untouched (fall back to ?plan=), null = closed by the user
   const [selection, setSelection] = useState<number | null | undefined>(undefined);
@@ -72,6 +86,8 @@ function PlansContent() {
   const requireKyc = Boolean(wallet.data?.config.requireKycForInvestment);
   const kycFetcher = useCallback(() => api.getKycInfo(token as string), [token]);
   const kyc = useAsyncData(token && requireKyc ? kycFetcher : null);
+
+  if (authLoading || !token) return <FullPageMessage>Loading plans...</FullPageMessage>;
 
   const paramPlanId = Number(searchParams.get('plan')) || null;
   const selectedId = selection === undefined ? (token ? paramPlanId : null) : selection;
@@ -90,13 +106,13 @@ function PlansContent() {
     <PageShell>
       <PageHeader
         title="Investment plans"
-        subtitle="Choose a fixed-term plan, invest from your wallet and receive your principal plus the expected profit at maturity, as per the plan terms."
+        subtitle="Invest your capital in a plan and earn a monthly profit, paid into your profit wallet every working day. Withdraw profit any time; your capital stays invested until you close the plan or it matures."
         actions={
           token ? (
             <Link href="/wallet" className={secondaryButtonClass}>
               <Wallet className="w-3.5 h-3.5" />
               <span>
-                Wallet balance: {wallet.data ? formatINR(wallet.data.balance) : wallet.error ? 'unavailable' : '...'}
+                Capital available: {wallet.data ? formatINR(wallet.data.capitalBalance) : wallet.error ? 'unavailable' : '...'}
               </span>
             </Link>
           ) : (
@@ -144,9 +160,12 @@ function PlansContent() {
       )}
 
       <p className="text-[11px] text-zinc-500 leading-relaxed">
-        Profit and maturity dates are calculated by MoonTech when you confirm an investment. Amounts shown before
-        confirmation are estimates. Investments carry risk; the profit shown is the expected amount as per the plan
-        terms.
+        Monthly profit is paid as 20 equal credits: 4 weeks of 5 working days (Monday to Friday) at {PAYOUT_TIME_LABEL}.
+        Profit never earns profit by itself; only invested capital earns. Your capital can be withdrawn at any time:
+        closing a plan before it ends carries an early withdrawal fee
+        {wallet.data ? ` of ${wallet.data.config.capitalWithdrawalFeePercent}%` : ''}; after maturity it is returned in
+        full. Re-investing is free. Amounts shown before confirmation are estimates and are recalculated by MoonTech
+        when you confirm.
       </p>
 
       {selectedPlan && token && (
@@ -178,6 +197,11 @@ function PlanCard({
 }) {
   const example = exampleAmount(plan);
   const exampleProfit = estimateProfit(plan, example);
+  const exampleDaily = dailyProfitFor(plan, example);
+  const exampleWeekly = weeklyProfitFor(plan, example);
+  const exampleMonthly = monthlyProfitFor(plan, example);
+  const daily = isDailyPlan(plan);
+  const openEnded = isOpenEndedPlan(plan);
   const available = plan.isActive;
 
   return (
@@ -187,10 +211,10 @@ function PlanCard({
       }`}
     >
       <div>
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="font-bold text-zinc-950 dark:text-white text-base leading-snug">{plan.name}</h2>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h2 className="font-bold text-zinc-950 dark:text-white text-base leading-snug">{plan.name}</h2>
+            <div className="flex items-center gap-2 flex-wrap mt-1">
               {plan.isFeatured && available && (
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">
                   Featured
@@ -198,15 +222,15 @@ function PlanCard({
               )}
               {!available && <StatusBadge status="NOT_AVAILABLE" label="Not available" />}
             </div>
-            <p className="text-xs text-zinc-500 mt-0.5">{formatDuration(plan.durationDays)} term</p>
           </div>
-          <div className="text-right shrink-0">
-            <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
-              {formatProfit(plan.profitType, plan.profitValue)}
+          <div className="text-right shrink-0 max-w-[10rem]">
+            <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 tabular-nums whitespace-nowrap">
+              {formatProfit(plan.profitType, plan.profitValue, plan.payoutMode, plan.rateBasis)}
             </div>
-            <div className="text-[10px] text-zinc-500">{plan.profitType === 'FIXED' ? 'expected profit at maturity' : 'expected profit over the term'}</div>
+            <div className="text-[10px] text-zinc-500 leading-snug">{profitCaption(plan)}</div>
           </div>
         </div>
+        <p className="text-xs text-zinc-500 mt-2 mb-4">{termSummary(plan)}</p>
 
         {plan.description && (
           <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed mb-4">{plan.description}</p>
@@ -218,20 +242,45 @@ function PlanCard({
             <span className="tabular-nums text-zinc-900 dark:text-zinc-200 font-medium text-right">{formatPlanRange(plan)}</span>
           </div>
           <div className="flex justify-between items-center gap-3">
-            <span className="text-zinc-500 dark:text-zinc-400">Investment period</span>
+            <span className="text-zinc-500 dark:text-zinc-400">Term</span>
             <span className="text-zinc-900 dark:text-zinc-200 font-medium">{formatDuration(plan.durationDays)}</span>
           </div>
           <div className="flex justify-between items-center gap-3">
+            <span className="text-zinc-500 dark:text-zinc-400">Capital</span>
+            <span className="text-zinc-900 dark:text-zinc-200 font-medium text-right">{lockInDescription(plan)}</span>
+          </div>
+          <div className="flex justify-between items-center gap-3">
             <span className="text-zinc-500 dark:text-zinc-400">Payout</span>
-            <span className="text-zinc-700 dark:text-zinc-300 text-right">Principal + profit at maturity</span>
+            <span className="text-zinc-700 dark:text-zinc-300 text-right">{payoutDescription(plan)}</span>
           </div>
         </div>
 
         <p className="mt-3.5 p-3 rounded-xl bg-emerald-500/[0.06] border border-emerald-500/15 text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed">
           <span className="text-zinc-500">Example: </span>
-          <span className="tabular-nums font-semibold text-zinc-900 dark:text-white">{formatINRShort(example)}</span> becomes{' '}
-          <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{formatINRShort(example + exampleProfit)}</span> in{' '}
-          {formatDuration(plan.durationDays)}.
+          {daily ? (
+            <>
+              <span className="tabular-nums font-semibold text-zinc-900 dark:text-white">{formatINRShort(example)}</span> earns{' '}
+              <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{formatINRShort(exampleMonthly)}</span> a
+              month, paid as{' '}
+              <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{formatINRShort(exampleWeekly)}</span> a week
+              and <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{formatINRShort(exampleDaily)}</span> every
+              working day at {PAYOUT_TIME_LABEL}.{' '}
+              {openEnded ? (
+                <>For as long as your capital stays invested; close the plan whenever you like.</>
+              ) : (
+                <>
+                  About <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{formatINRShort(exampleProfit)}</span>{' '}
+                  over {formatDuration(plan.durationDays)}; your capital comes back to your capital wallet at maturity.
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="tabular-nums font-semibold text-zinc-900 dark:text-white">{formatINRShort(example)}</span> becomes{' '}
+              <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{formatINRShort(example + exampleProfit)}</span> in{' '}
+              {formatDuration(plan.durationDays)}.
+            </>
+          )}
         </p>
       </div>
 
@@ -279,13 +328,17 @@ function InvestModal({
   onClose: () => void;
 }) {
   const [amountInput, setAmountInput] = useState(String(plan.minAmount));
+  const [source, setSource] = useState<WalletBucket>('CAPITAL');
   const [stage, setStage] = useState<'form' | 'confirm'>('form');
   const [result, setResult] = useState<PreviewResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [investment, setInvestment] = useState<Investment | null>(null);
 
-  const balance = wallet?.balance ?? null;
+  // The chosen wallet pays for the investment; re-invested profit becomes capital
+  const balance = wallet ? (source === 'CAPITAL' ? wallet.capitalBalance : wallet.profitBalance) : null;
+  const feePercent = wallet?.config.capitalWithdrawalFeePercent ?? 0;
+  const openEnded = isOpenEndedPlan(plan);
   const kycBlocked = kycStatus !== 'NOT_REQUIRED' && kycStatus !== 'VERIFIED';
 
   // Client-side validation (display only: the server validates again)
@@ -304,7 +357,7 @@ function InvestModal({
     let active = true;
     const timer = setTimeout(() => {
       api
-        .previewInvestment(token, plan.id, validAmount)
+        .previewInvestment(token, plan.id, validAmount, source)
         .then((preview) => {
           if (active) setResult({ amount: validAmount, preview, error: '' });
         })
@@ -318,7 +371,7 @@ function InvestModal({
       active = false;
       clearTimeout(timer);
     };
-  }, [token, plan.id, validAmount, kycBlocked]);
+  }, [token, plan.id, validAmount, source, kycBlocked]);
 
   const current = result && result.amount === validAmount ? result : null;
   const preview = current?.preview || null;
@@ -332,7 +385,7 @@ function InvestModal({
     setError('');
     setSubmitting(true);
     try {
-      const created = await api.createInvestment(token, plan.id, validAmount);
+      const created = await api.createInvestment(token, plan.id, validAmount, source);
       setInvestment(created);
       onInvested();
     } catch (err: unknown) {
@@ -352,14 +405,45 @@ function InvestModal({
           </p>
           <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-white/[0.06] text-xs text-left">
             <DetailRow label="Investment ID" value={<span className="font-mono">{investment.reference}</span>} />
-            <DetailRow label="Expected profit" value={<span className="tabular-nums font-semibold">+{formatINR(investment.expectedProfit)}</span>} tone="profit" />
-            <DetailRow label="Maturity amount" value={<span className="tabular-nums font-bold">{formatINR(investment.maturityAmount)}</span>} strong />
-            <DetailRow label="Maturity date" value={formatDate(investment.maturityDate)} />
+            {investment.payoutMode === 'DAILY' && (
+              <>
+                <DetailRow
+                  label="Daily profit"
+                  value={<span className="tabular-nums font-semibold">+{formatINR(investment.dailyProfit)} every working day</span>}
+                  tone="profit"
+                />
+                <DetailRow label="Weekly" value={<span className="tabular-nums font-semibold">+{formatINR(investment.weeklyProfit)}</span>} tone="profit" />
+                <DetailRow label="Monthly" value={<span className="tabular-nums font-semibold">+{formatINR(investment.monthlyProfit)}</span>} tone="profit" />
+              </>
+            )}
+            {!(investment.payoutMode === 'DAILY' && investment.isOpenEnded) && (
+              <DetailRow
+                label={investment.payoutMode === 'DAILY' ? 'Total expected profit' : 'Expected profit'}
+                value={<span className="tabular-nums font-semibold">+{formatINR(investment.expectedProfit)}</span>}
+                tone="profit"
+              />
+            )}
+            <DetailRow
+              label={investment.payoutMode === 'DAILY' ? 'Capital invested' : 'Maturity amount'}
+              value={<span className="tabular-nums font-bold">{formatINR(investment.payoutMode === 'DAILY' ? investment.amount : investment.maturityAmount)}</span>}
+              strong
+            />
+            <DetailRow
+              label={investment.isOpenEnded ? 'Term' : 'Maturity date'}
+              value={investment.isOpenEnded ? 'Open-ended · close any time' : formatDate(investment.maturityDate)}
+            />
             <DetailRow label="Status" value={<StatusBadge status={investment.status} kind="investment" />} />
           </div>
           <p className="text-[11px] text-zinc-500 leading-relaxed text-left">
-            What happens next: your investment runs until the maturity date. You will be notified when it matures, and
-            you can then request a withdrawal of the principal and profit to your bank account or UPI.
+            {investment.payoutMode === 'DAILY'
+              ? `What happens next: ${formatINR(investment.dailyProfit)} is credited to your profit wallet every working day (Monday to Friday) at ${PAYOUT_TIME_LABEL}, about ${formatINR(
+                  investment.monthlyProfit
+                )} a month. Withdraw profit any time from the Wallet page. ${
+                  investment.isOpenEnded
+                    ? `Your capital keeps earning until you close the plan; a ${investment.feePercent}% early withdrawal fee applies when you close it.`
+                    : `Your capital returns to your capital wallet at maturity with no fee; closing the plan earlier carries a ${investment.feePercent}% fee.`
+                }`
+              : 'What happens next: your investment runs until the maturity date. You will be notified when it matures, and you can then request a withdrawal of the principal and profit to your bank account.'}
           </p>
           <div className="flex items-center gap-3">
             <button type="button" onClick={onClose} className={`${secondaryButtonClass} flex-1`}>
@@ -422,29 +506,66 @@ function InvestModal({
     return (
       <Modal
         title="Confirm your investment"
-        description="Please review the details. The amount is debited from your wallet as soon as you confirm."
+        description={`Please review the details. The amount is debited from your ${BUCKET_LABELS[source].toLowerCase()} as soon as you confirm.`}
         onClose={onClose}
         closeDisabled={submitting}
       >
         {error && <Alert className="mb-4">{error}</Alert>}
         <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-white/[0.06] text-xs">
           <DetailRow label="Plan" value={preview.planName} />
-          <DetailRow label="Investment amount" value={<span className="tabular-nums font-bold">{formatINR(preview.amount)}</span>} strong />
-          <DetailRow label="Profit" value={formatProfit(preview.profitType, preview.profitValue)} />
-          <DetailRow label="Investment period" value={formatDuration(preview.durationDays)} />
-          <DetailRow label="Expected profit" value={<span className="tabular-nums font-semibold">+{formatINR(preview.expectedProfit)}</span>} tone="profit" />
-          <DetailRow label="Maturity amount" value={<span className="tabular-nums font-bold">{formatINR(preview.maturityAmount)}</span>} strong />
-          <DetailRow label="Maturity date" value={formatDate(preview.maturityDate)} />
+          <DetailRow label="Capital invested" value={<span className="tabular-nums font-bold">{formatINR(preview.amount)}</span>} strong />
+          <DetailRow label="Paid from" value={BUCKET_LABELS[source]} />
+          <DetailRow
+            label="Profit rate"
+            value={`${formatProfit(preview.profitType, preview.profitValue, preview.payoutMode, preview.rateBasis)}${
+              preview.payoutMode === 'DAILY' && preview.rateBasis !== 'PER_DAY' ? ` = ${preview.dailyRatePercent}% per working day` : ''
+            }`}
+          />
+          <DetailRow label="Term" value={formatDuration(preview.durationDays)} />
+          {preview.payoutMode === 'DAILY' && (
+            <>
+              <DetailRow label="Daily profit" value={<span className="tabular-nums font-semibold">+{formatINR(preview.dailyProfit)}</span>} tone="profit" />
+              <DetailRow label="Weekly profit" value={<span className="tabular-nums font-semibold">+{formatINR(preview.weeklyProfit)}</span>} tone="profit" />
+              <DetailRow label="Monthly profit" value={<span className="tabular-nums font-semibold">+{formatINR(preview.monthlyProfit)}</span>} tone="profit" />
+              {!preview.isOpenEnded && (
+                <DetailRow label="Paying days" value={`${preview.profitDays} working days (Mon–Fri, ${PAYOUT_TIME_LABEL})`} />
+              )}
+            </>
+          )}
+          {!(preview.payoutMode === 'DAILY' && preview.isOpenEnded) && (
+            <DetailRow
+              label={preview.payoutMode === 'DAILY' ? 'Total expected profit' : 'Expected profit'}
+              value={<span className="tabular-nums font-semibold">+{formatINR(preview.expectedProfit)}</span>}
+              tone="profit"
+            />
+          )}
+          {preview.payoutMode !== 'DAILY' && (
+            <DetailRow label="Maturity amount" value={<span className="tabular-nums font-bold">{formatINR(preview.maturityAmount)}</span>} strong />
+          )}
+          <DetailRow
+            label={preview.isOpenEnded ? 'Maturity' : 'Maturity date'}
+            value={preview.isOpenEnded ? 'None · close the plan any time' : formatDate(preview.maturityDate)}
+          />
+          <DetailRow
+            label={`Early withdrawal fee (${preview.feePercent}%)`}
+            value={
+              <span className="tabular-nums">
+                {formatINR(preview.capitalWithdrawalFee)} · you would receive {formatINR(preview.netCapitalOnWithdrawal)} if you close
+                the plan early
+              </span>
+            }
+          />
           {balance !== null && (
             <DetailRow
-              label="Wallet balance after"
+              label={`${BUCKET_LABELS[source]} after`}
               value={<span className="tabular-nums font-semibold">{formatINR(balance - preview.amount)}</span>}
             />
           )}
         </div>
         <p className="text-[11px] text-zinc-500 leading-relaxed mt-3">
-          The investment stays locked until the maturity date. You can request a withdrawal after it matures. The profit
-          shown is the expected amount as per the plan terms.
+          Profit is credited to your profit wallet and can be withdrawn any time without fee. Only the invested capital
+          earns; profit is not compounded. Your capital can be withdrawn at any time: closing the plan before it ends
+          carries the early withdrawal fee shown{preview.isOpenEnded ? '' : '; after maturity it is returned in full'}.
         </p>
         <div className="flex items-center gap-3 mt-4">
           <button
@@ -469,11 +590,21 @@ function InvestModal({
   }
 
   const estimatedProfit = validAmount !== null ? estimateProfit(plan, validAmount) : 0;
+  const estimatedDaily = validAmount !== null ? dailyProfitFor(plan, validAmount) : 0;
+  const estimatedWeekly = validAmount !== null ? weeklyProfitFor(plan, validAmount) : 0;
+  const estimatedMonthly = validAmount !== null ? monthlyProfitFor(plan, validAmount) : 0;
+  const estimatedFee = validAmount !== null ? capitalFeeFor(validAmount, feePercent) : 0;
 
   return (
     <Modal
       title={`Invest in ${plan.name}`}
-      description={`${formatProfit(plan.profitType, plan.profitValue)} expected profit over ${formatDuration(plan.durationDays)}.`}
+      description={
+        isDailyPlan(plan)
+          ? `${formatProfit(plan.profitType, plan.profitValue, plan.payoutMode, plan.rateBasis)} on your capital, credited to your profit wallet every working day at ${PAYOUT_TIME_LABEL}. ${
+              openEnded ? 'Close the plan whenever you like.' : `${formatDuration(plan.durationDays)} term; capital back at maturity, or earlier if you close the plan.`
+            }`
+          : `${formatProfit(plan.profitType, plan.profitValue)} expected profit over ${formatDuration(plan.durationDays)}.`
+      }
       onClose={onClose}
     >
       <form
@@ -484,14 +615,46 @@ function InvestModal({
           if (canContinue) setStage('confirm');
         }}
       >
-        <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-white/[0.06] text-xs flex items-center justify-between gap-3">
-          <span className="text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
-            <Wallet className="w-3.5 h-3.5" /> Wallet balance
-          </span>
-          <span className="tabular-nums font-semibold text-zinc-900 dark:text-white">
-            {balance !== null ? formatINR(balance) : walletLoading ? 'Loading...' : 'Unavailable'}
-          </span>
-        </div>
+        <fieldset>
+          <legend className="text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Pay from</legend>
+          <div className="grid grid-cols-2 gap-2">
+            {(['CAPITAL', 'PROFIT'] as WalletBucket[]).map((option) => {
+              const selected = source === option;
+              const optionBalance = wallet ? (option === 'CAPITAL' ? wallet.capitalBalance : wallet.profitBalance) : null;
+              return (
+                <label
+                  key={option}
+                  className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition text-xs ${
+                    selected
+                      ? 'border-blue-600/40 bg-blue-600/5 dark:bg-blue-600/10'
+                      : 'border-zinc-200 dark:border-white/10 hover:border-zinc-300 dark:hover:border-white/20'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="investSource"
+                    value={option}
+                    checked={selected}
+                    onChange={() => setSource(option)}
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0">
+                    <div className="font-semibold text-zinc-900 dark:text-white flex items-center gap-1.5">
+                      {option === 'CAPITAL' ? <Landmark className="w-3.5 h-3.5 text-blue-600" /> : <Wallet className="w-3.5 h-3.5 text-emerald-500" />}
+                      {BUCKET_LABELS[option]}
+                    </div>
+                    <div className="tabular-nums text-zinc-600 dark:text-zinc-400 mt-0.5">
+                      {optionBalance !== null ? formatINR(optionBalance) : walletLoading ? 'Loading...' : 'Unavailable'}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+          {source === 'PROFIT' && (
+            <p className="text-[11px] text-zinc-500 mt-1.5">Re-invested profit becomes capital and starts earning daily profit.</p>
+          )}
+        </fieldset>
         {walletError && balance === null && <Alert>{walletError}</Alert>}
 
         <div>
@@ -506,8 +669,14 @@ function InvestModal({
             type="text"
             inputMode="decimal"
             autoComplete="off"
+            maxLength={12}
             value={amountInput}
-            onChange={(e) => setAmountInput(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value.replace(/[^0-9.]/g, '');
+              const parts = val.split('.');
+              const clean = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : val;
+              setAmountInput(clean);
+            }}
             aria-invalid={Boolean(amountError)}
             aria-describedby={amountError ? 'invest-amount-error' : 'invest-amount-help'}
             className={`${inputClass} tabular-nums text-sm font-semibold`}
@@ -525,10 +694,16 @@ function InvestModal({
 
         {insufficient && balance !== null && validAmount !== null && (
           <Alert tone="warning">
-            Your wallet balance is {formatINR(validAmount - balance)} short for this amount.{' '}
-            <Link href="/wallet" className="underline font-semibold">
-              Add money to your wallet
-            </Link>
+            Your {BUCKET_LABELS[source].toLowerCase()} is {formatINR(validAmount - balance)} short for this amount.{' '}
+            {source === 'CAPITAL' ? (
+              <Link href="/wallet" className="underline font-semibold">
+                Add money to your capital wallet
+              </Link>
+            ) : (
+              <button type="button" onClick={() => setSource('CAPITAL')} className="underline font-semibold">
+                Pay from your capital wallet instead
+              </button>
+            )}
           </Alert>
         )}
 
@@ -538,28 +713,56 @@ function InvestModal({
               <Alert>{current.error}</Alert>
             ) : (
               <div className={previewLoading ? 'opacity-60' : ''} aria-busy={previewLoading}>
+                {isDailyPlan(plan) && (
+                  <>
+                    <DetailRow
+                      label="Daily profit (Mon–Fri)"
+                      value={<span className="tabular-nums font-semibold">+{formatINR(preview ? preview.dailyProfit : estimatedDaily)}</span>}
+                      tone="profit"
+                    />
+                    <DetailRow
+                      label="Weekly profit"
+                      value={<span className="tabular-nums font-semibold">+{formatINR(preview ? preview.weeklyProfit : estimatedWeekly)}</span>}
+                      tone="profit"
+                    />
+                    <DetailRow
+                      label="Monthly profit"
+                      value={<span className="tabular-nums font-semibold">+{formatINR(preview ? preview.monthlyProfit : estimatedMonthly)}</span>}
+                      tone="profit"
+                    />
+                  </>
+                )}
+                {!(isDailyPlan(plan) && openEnded) && (
+                  <DetailRow
+                    label={isDailyPlan(plan) ? `Total over ${formatDuration(plan.durationDays)}` : 'Expected profit'}
+                    value={
+                      <span className="tabular-nums font-semibold">
+                        +{formatINR(preview ? preview.expectedProfit : estimatedProfit)}
+                        {isDailyPlan(plan) && preview ? ` (${preview.profitDays} working days)` : ''}
+                      </span>
+                    }
+                    tone="profit"
+                  />
+                )}
+                {!isDailyPlan(plan) && (
+                  <DetailRow
+                    label="Maturity amount"
+                    value={<span className="tabular-nums font-bold">{formatINR(preview ? preview.maturityAmount : validAmount + estimatedProfit)}</span>}
+                    strong
+                  />
+                )}
                 <DetailRow
-                  label="Expected profit"
-                  value={<span className="tabular-nums font-semibold">+{formatINR(preview ? preview.expectedProfit : estimatedProfit)}</span>}
-                  tone="profit"
-                />
-                <DetailRow
-                  label="Maturity amount"
-                  value={
-                    <span className="tabular-nums font-bold">
-                      {formatINR(preview ? preview.maturityAmount : validAmount + estimatedProfit)}
-                    </span>
-                  }
-                  strong
-                />
-                <DetailRow
-                  label="Maturity date"
+                  label={openEnded ? 'Term' : 'Maturity date'}
                   value={
                     <span className="inline-flex items-center gap-1">
                       <CalendarClock className="w-3 h-3 text-zinc-400" />
-                      {preview ? formatDate(preview.maturityDate) : 'Calculating...'}
+                      {openEnded ? 'Open-ended · close any time' : preview ? formatDate(preview.maturityDate) : 'Calculating...'}
                     </span>
                   }
+                />
+                <DetailRow
+                  label={`Early withdrawal fee (${preview ? preview.feePercent : feePercent}%)`}
+                  value={<span className="tabular-nums">{formatINR(preview ? preview.capitalWithdrawalFee : estimatedFee)}</span>}
                 />
                 {previewLoading && <p className="text-[10px] text-zinc-500 pt-1">Estimate shown. Confirming with the server...</p>}
               </div>

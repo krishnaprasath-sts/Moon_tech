@@ -4,7 +4,7 @@ import { ModalShell } from './ModalShell';
 import { useCreateCustomer } from '../hooks';
 import { useToast } from '../context/ToastContext';
 import { Field, FormError, inputClass, btnGhostClass, btnPrimaryClass } from './ui';
-import { getApiErrorMessage } from '../utils/finance';
+import { getApiErrorMessage, getApiFieldErrors, getErrorStatus } from '../utils/finance';
 
 interface AddCustomerModalProps {
   isOpen: boolean;
@@ -28,9 +28,34 @@ const EMPTY_FORM = {
 type FormState = typeof EMPTY_FORM;
 type FormErrors = Partial<Record<keyof FormState, string>>;
 
+// Mirrors backend/node/src/validators/authValidators.ts (createCustomerSchema); the server re-checks everything.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE_PATTERN = /^\+?[0-9]{10,15}$/;
+/** Indian mobile: optional +91 / 91 / 0 prefix, then 10 digits starting with 6-9 */
+const PHONE_PATTERN = /^(?:\+?91|0)?[6-9][0-9]{9}$/;
+const NAME_PATTERN = /^[A-Za-z][A-Za-z .'-]*$/;
+const REFERRAL_PATTERN = /^[A-Z]{4}[0-9]{4}$/;
 const PINCODE_PATTERN = /^[1-9][0-9]{5}$/;
+const MIN_AGE = 18;
+const MAX_AGE = 120;
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+const ageOn = (dob: Date, on: Date) => {
+  let age = on.getUTCFullYear() - dob.getUTCFullYear();
+  const hadBirthday =
+    on.getUTCMonth() > dob.getUTCMonth() || (on.getUTCMonth() === dob.getUTCMonth() && on.getUTCDate() >= dob.getUTCDate());
+  return hadBirthday ? age : age - 1;
+};
+
+/** Validation message for an optional place name (city / state) */
+const validatePlace = (value: string, label: string): string | undefined => {
+  const v = value.trim();
+  if (!v) return undefined;
+  if (v.length < 2) return `${label} must be at least 2 characters`;
+  if (v.length > 100) return `${label} cannot be longer than 100 characters`;
+  if (!NAME_PATTERN.test(v)) return `${label} can only contain letters, spaces, dots, apostrophes and hyphens`;
+  return undefined;
+};
 
 // Random password that satisfies the "min 8, one letter, one digit" rule
 const generatePassword = () => {
@@ -69,13 +94,56 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onCl
 
   const validate = (): boolean => {
     const next: FormErrors = {};
-    if (form.name.trim().length < 2) next.name = "Enter the customer's full name";
-    if (!EMAIL_PATTERN.test(form.email.trim())) next.email = 'Enter a valid email address';
-    if (!PHONE_PATTERN.test(form.phone.replace(/[\s-]/g, ''))) next.phone = 'Enter a valid 10-15 digit phone number';
-    if (form.password && (form.password.length < 8 || !/[A-Za-z]/.test(form.password) || !/\d/.test(form.password))) {
-      next.password = 'Minimum 8 characters with at least one letter and one digit';
+
+    const name = form.name.trim();
+    if (!name) next.name = "Enter the customer's full name";
+    else if (name.length < 2) next.name = 'Name must be at least 2 characters';
+    else if (name.length > 100) next.name = 'Name cannot be longer than 100 characters';
+    else if (!NAME_PATTERN.test(name)) next.name = 'Name can only contain letters, spaces, dots, apostrophes and hyphens';
+
+    const email = form.email.trim();
+    if (!email) next.email = 'Enter the email address';
+    else if (email.length > 255 || !EMAIL_PATTERN.test(email)) next.email = 'Enter a valid email address';
+
+    const phone = form.phone.replace(/[\s-]/g, '');
+    if (!phone) next.phone = 'Enter the mobile number';
+    else if (!PHONE_PATTERN.test(phone)) next.phone = 'Enter a valid 10-digit Indian mobile number (starts with 6-9, +91 optional)';
+
+    if (form.password) {
+      if (/\s/.test(form.password)) next.password = 'Password cannot contain spaces';
+      else if (form.password.length < 8) next.password = 'Password must be at least 8 characters';
+      else if (form.password.length > 100) next.password = 'Password cannot be longer than 100 characters';
+      else if (!/[A-Za-z]/.test(form.password) || !/\d/.test(form.password)) {
+        next.password = 'Password needs at least one letter and one digit';
+      }
     }
-    if (form.pincode.trim() && !PINCODE_PATTERN.test(form.pincode.trim())) next.pincode = 'Pincode must be 6 digits';
+
+    const referral = form.referralNumber.trim().toUpperCase();
+    if (referral && !REFERRAL_PATTERN.test(referral)) {
+      next.referralNumber = 'Referral code is 4 letters followed by 4 digits, e.g. RAHU1001';
+    }
+
+    if (form.dateOfBirth) {
+      const dob = new Date(`${form.dateOfBirth}T00:00:00.000Z`);
+      const now = new Date();
+      if (Number.isNaN(dob.getTime())) next.dateOfBirth = 'Enter a valid date of birth';
+      else if (dob.getTime() > now.getTime()) next.dateOfBirth = 'Date of birth cannot be in the future';
+      else if (ageOn(dob, now) < MIN_AGE) next.dateOfBirth = `Customer must be at least ${MIN_AGE} years old`;
+      else if (ageOn(dob, now) > MAX_AGE) next.dateOfBirth = 'Date of birth is not realistic';
+    }
+
+    const address = form.address.trim();
+    if (address && address.length < 5) next.address = 'Address must be at least 5 characters';
+    else if (address.length > 255) next.address = 'Address cannot be longer than 255 characters';
+
+    const cityError = validatePlace(form.city, 'City');
+    if (cityError) next.city = cityError;
+    const stateError = validatePlace(form.state, 'State');
+    if (stateError) next.state = stateError;
+
+    const pincode = form.pincode.trim();
+    if (pincode && !PINCODE_PATTERN.test(pincode)) next.pincode = 'Pincode must be 6 digits and cannot start with 0';
+
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -105,7 +173,21 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onCl
       onClose();
     } catch (err) {
       const msg = getApiErrorMessage(err, 'Failed to create the customer account');
-      setFormError(msg);
+      // Put server-side messages next to the field they belong to
+      const fieldErrors = getApiFieldErrors(err) as FormErrors;
+      const status = getErrorStatus(err);
+      if (status === 409) {
+        const lower = msg.toLowerCase();
+        if (lower.includes('email')) fieldErrors.email = msg;
+        else if (lower.includes('phone')) fieldErrors.phone = msg;
+      } else if (status === 400 && msg.toLowerCase().includes('referral code')) {
+        fieldErrors.referralNumber = msg;
+      }
+      if (Object.keys(fieldErrors).length > 0) {
+        setErrors((prev) => ({ ...prev, ...fieldErrors }));
+      } else {
+        setFormError(msg);
+      }
       toast.error(msg);
     }
   };
@@ -155,6 +237,8 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onCl
                 onChange={update('name')}
                 placeholder="e.g. Ramesh Chandra"
                 autoComplete="off"
+                maxLength={100}
+                aria-invalid={Boolean(errors.name)}
                 className={inputClass}
               />
             </Field>
@@ -167,6 +251,8 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onCl
                 onChange={update('email')}
                 placeholder="customer@example.com"
                 autoComplete="off"
+                maxLength={255}
+                aria-invalid={Boolean(errors.email)}
                 className={inputClass}
               />
             </Field>
@@ -179,6 +265,9 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onCl
                 onChange={update('phone')}
                 placeholder="+919876543210"
                 autoComplete="off"
+                inputMode="tel"
+                maxLength={16}
+                aria-invalid={Boolean(errors.phone)}
                 className={`${inputClass} font-mono`}
               />
             </Field>
@@ -209,6 +298,8 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onCl
                   onChange={update('password')}
                   placeholder="Leave blank to let the system assign one"
                   autoComplete="new-password"
+                  maxLength={100}
+                  aria-invalid={Boolean(errors.password)}
                   className={`${inputClass} font-mono pr-10`}
                 />
                 <button
@@ -237,57 +328,66 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onCl
             Referral & profile
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            <Field label="Referred by (referral code)" htmlFor={`${formId}-referral`} optional>
+            <Field label="Referred by (referral code)" htmlFor={`${formId}-referral`} optional error={errors.referralNumber}>
               <input
                 id={`${formId}-referral`}
                 type="text"
                 value={form.referralNumber}
                 onChange={update('referralNumber')}
                 placeholder="e.g. RAHU1001"
+                maxLength={8}
+                aria-invalid={Boolean(errors.referralNumber)}
                 className={`${inputClass} uppercase font-mono`}
               />
             </Field>
 
-            <Field label="Date of birth" htmlFor={`${formId}-dob`} optional>
+            <Field label="Date of birth" htmlFor={`${formId}-dob`} optional hint={`Customer must be ${MIN_AGE}+`} error={errors.dateOfBirth}>
               <input
                 id={`${formId}-dob`}
                 type="date"
                 value={form.dateOfBirth}
-                max={new Date().toISOString().slice(0, 10)}
+                max={todayIso()}
                 onChange={update('dateOfBirth')}
+                aria-invalid={Boolean(errors.dateOfBirth)}
                 className={inputClass}
               />
             </Field>
 
-            <Field label="City" htmlFor={`${formId}-city`} optional>
+            <Field label="City" htmlFor={`${formId}-city`} optional error={errors.city}>
               <input
                 id={`${formId}-city`}
                 type="text"
                 value={form.city}
                 onChange={update('city')}
                 placeholder="e.g. Mumbai"
+                maxLength={100}
+                aria-invalid={Boolean(errors.city)}
                 className={inputClass}
               />
             </Field>
 
-            <Field label="State" htmlFor={`${formId}-state`} optional>
+            <Field label="State" htmlFor={`${formId}-state`} optional error={errors.state}>
               <input
                 id={`${formId}-state`}
                 type="text"
                 value={form.state}
                 onChange={update('state')}
                 placeholder="e.g. Maharashtra"
+                maxLength={100}
+                aria-invalid={Boolean(errors.state)}
                 className={inputClass}
               />
             </Field>
 
-            <Field label="Address" htmlFor={`${formId}-address`} optional className="sm:col-span-2">
+            <Field label="Address" htmlFor={`${formId}-address`} optional className="sm:col-span-2" error={errors.address}>
               <input
                 id={`${formId}-address`}
                 type="text"
                 value={form.address}
                 onChange={update('address')}
                 placeholder="Street / building address"
+                maxLength={255}
+                aria-invalid={Boolean(errors.address)}
                 className={inputClass}
               />
             </Field>
@@ -301,6 +401,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({ isOpen, onCl
                 value={form.pincode}
                 onChange={update('pincode')}
                 placeholder="6 digits"
+                aria-invalid={Boolean(errors.pincode)}
                 className={`${inputClass} font-mono`}
               />
             </Field>

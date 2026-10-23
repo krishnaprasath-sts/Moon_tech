@@ -10,7 +10,7 @@ import { PageHeader } from '../components/PageHeader';
 import { RefreshButton } from '../components/RefreshButton';
 import { SearchInput } from '../components/SearchInput';
 import { btnRowClass, filterCardClass, tableCardClass, theadClass, tbodyClass, trClass } from '../components/ui';
-import { formatDate, getApiErrorMessage } from '../utils/finance';
+import { formatDate, formatINR, getApiErrorMessage } from '../utils/finance';
 
 export const ReferralsPage: React.FC = () => {
   const [page, setPage] = useState(1);
@@ -56,12 +56,13 @@ export const ReferralsPage: React.FC = () => {
                 <th className="py-3.5 px-4">Referral Code</th>
                 <th className="py-3.5 px-4">Referred KYC</th>
                 <th className="py-3.5 px-4">Referred Account</th>
+                <th className="py-3.5 px-4 text-right">Commission</th>
                 <th className="py-3.5 px-4">Linked</th>
               </tr>
             </thead>
             <tbody className={tbodyClass}>
               <TableStateRow
-                colSpan={7}
+                colSpan={8}
                 isLoading={isLoading}
                 isError={isError}
                 isEmpty={referrals.length === 0}
@@ -124,6 +125,15 @@ export const ReferralsPage: React.FC = () => {
                     </td>
                     <td className="py-3.5 px-4">
                       <AccountStatusBadge status={ref.referred.accountStatus} />
+                    </td>
+                    <td className="py-3.5 px-4 text-right font-mono tabular-nums whitespace-nowrap">
+                      <div className="font-bold text-emerald-600 dark:text-emerald-400">
+                        {formatINR(ref.commissionEarned ?? 0)}
+                      </div>
+                      {Number(ref.commissionPending) > 0 && (
+                        <div className="text-[10px] text-amber-600 dark:text-amber-400">{formatINR(ref.commissionPending)} pending</div>
+                      )}
+                      {Number(ref.commissionCount) === 0 && <div className="text-[10px] text-slate-400">No investments yet</div>}
                     </td>
                     <td className="py-3.5 px-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">{formatDate(ref.createdAt)}</td>
                   </tr>

@@ -104,20 +104,42 @@ export const InvestmentDetailModal: React.FC<InvestmentDetailModalProps> = ({ in
                 </p>
               </div>
               <div className="p-4 rounded-2xl bg-emerald-500/5 border border-emerald-500/20">
-                <p className="text-[11px] uppercase font-semibold text-slate-500">Expected Profit</p>
-                <p className="text-lg font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
-                  +{formatINR(investment.expectedProfit)}
+                <p className="text-[11px] uppercase font-semibold text-slate-500">
+                  {investment.payoutMode === 'DAILY'
+                    ? investment.isOpenEnded
+                      ? 'Profit Per Month'
+                      : 'Total Expected Profit'
+                    : 'Expected Profit'}
                 </p>
+                <p className="text-lg font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
+                  +{formatINR(investment.payoutMode === 'DAILY' && investment.isOpenEnded ? investment.monthlyProfit : investment.expectedProfit)}
+                </p>
+                {investment.payoutMode === 'DAILY' && (
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    {formatINR(investment.dailyProfit)} / day · {formatINR(investment.weeklyProfit)} / week · {formatINR(investment.monthlyProfit)} / month
+                    {!investment.isOpenEnded ? ` · ${investment.profitDays} paying days` : ''}
+                  </p>
+                )}
               </div>
               <div className="p-4 rounded-2xl bg-brand-500/5 border border-brand-500/20">
-                <p className="text-[11px] uppercase font-semibold text-slate-500">Maturity Amount</p>
-                <p className="text-lg font-bold font-mono tabular-nums text-brand-600 dark:text-brand-400">
-                  {formatINR(investment.maturityAmount)}
+                <p className="text-[11px] uppercase font-semibold text-slate-500">
+                  {investment.payoutMode === 'DAILY' ? 'Profit Credited So Far' : 'Maturity Amount'}
                 </p>
+                <p className="text-lg font-bold font-mono tabular-nums text-brand-600 dark:text-brand-400">
+                  {formatINR(investment.payoutMode === 'DAILY' ? investment.profitCredited : investment.maturityAmount)}
+                </p>
+                {investment.payoutMode === 'DAILY' && (
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    {investment.isOpenEnded
+                      ? `Capital returned when closed, less ${investment.feePercent}% fee (${formatINR(investment.netCapitalOnWithdrawal)} net)`
+                      : `${formatINR(investment.profitRemaining)} remaining · capital returns to the capital wallet at maturity`}
+                  </p>
+                )}
               </div>
             </div>
 
             {/* Maturity progress */}
+            {!investment.isOpenEnded && (
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1">
                 <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1">
@@ -144,6 +166,7 @@ export const InvestmentDetailModal: React.FC<InvestmentDetailModalProps> = ({ in
                 />
               </div>
             </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               <DetailSection title="Customer">
@@ -164,11 +187,28 @@ export const InvestmentDetailModal: React.FC<InvestmentDetailModalProps> = ({ in
               <DetailSection title="Plan">
                 <DetailField label="Plan Name">{investment.planName}</DetailField>
                 <DetailField label="Profit">
-                  {investment.profitType === 'PERCENTAGE'
-                    ? `${investment.profitValue}% of principal`
-                    : `${formatINR(investment.profitValue)} fixed`}
+                  {investment.payoutMode === 'DAILY'
+                    ? investment.rateBasis === 'PER_MONTH'
+                      ? `${investment.profitValue}% of capital per month = ${investment.dailyRatePercent}% per working day, 20 credits a month (Mon–Fri, 6:00 AM IST)`
+                      : investment.rateBasis === 'PER_YEAR'
+                      ? `${investment.profitValue}% of capital per year = ${investment.dailyRatePercent}% per working day, 240 credits a year (Mon–Fri, 6:00 AM IST)`
+                      : `${investment.profitValue}% of capital every working day (Mon–Fri, 6:00 AM IST) — legacy rate`
+                    : investment.profitType === 'PERCENTAGE'
+                    ? `${investment.profitValue}% of principal at maturity`
+                    : `${formatINR(investment.profitValue)} fixed at maturity`}
                 </DetailField>
-                <DetailField label="Period">{investment.durationDays} days</DetailField>
+                <DetailField label="Period">
+                  {investment.isOpenEnded ? 'Open-ended (until the customer closes it)' : `${investment.durationDays} days`}
+                </DetailField>
+                <DetailField label="Early withdrawal fee">
+                  {investment.earlyExitFeeApplies
+                    ? `${investment.feePercent}% (${formatINR(investment.capitalWithdrawalFee)}) if closed now · customer receives ${formatINR(
+                        investment.netCapitalOnWithdrawal
+                      )}`
+                    : `None (${investment.feePercent}% applied only before maturity) · customer receives ${formatINR(
+                        investment.netCapitalOnWithdrawal
+                      )}`}
+                </DetailField>
                 <DetailField label="Status">
                   <FinanceStatusBadge status={investment.status} />
                 </DetailField>
@@ -177,7 +217,9 @@ export const InvestmentDetailModal: React.FC<InvestmentDetailModalProps> = ({ in
               <DetailSection title="Timeline">
                 <DetailField label="Created At">{formatDateTime(investment.createdAt)}</DetailField>
                 <DetailField label="Start Date">{formatDateTime(investment.startDate)}</DetailField>
-                <DetailField label="Maturity Date">{formatDateTime(investment.maturityDate)}</DetailField>
+                <DetailField label="Maturity Date">
+                  {investment.maturityDate ? formatDateTime(investment.maturityDate) : 'None (open-ended)'}
+                </DetailField>
                 <DetailField label="Matured At">{formatDateTime(investment.maturedAt)}</DetailField>
                 <DetailField label="Completed At">{formatDateTime(investment.completedAt)}</DetailField>
                 {investment.cancelledAt && (
@@ -186,28 +228,96 @@ export const InvestmentDetailModal: React.FC<InvestmentDetailModalProps> = ({ in
               </DetailSection>
 
               <DetailSection title="Withdrawal Controls">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-bold text-slate-900 dark:text-white">Allow early withdrawal</p>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Lets the customer withdraw before maturity. Pays the principal only unless a profit is set on
-                      approval.
-                    </p>
+                {Number(investment.lockInDays) > 0 && (
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white">Allow early exit</p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Legacy investment with a lock-in until{' '}
+                        {investment.lockInEndsAt ? formatDateTime(investment.lockInEndsAt) : 'the end of its term'}. Lets the
+                        customer withdraw the capital earlier; the early withdrawal fee still applies.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={investment.earlyWithdrawalAllowed}
+                      onChange={handleToggleEarly}
+                      label="Allow early withdrawal"
+                      disabled={!canManage}
+                      busy={earlyMutation.isPending}
+                      title={canManage ? undefined : 'Only managers can change this on active investments'}
+                    />
                   </div>
-                  <Switch
-                    checked={investment.earlyWithdrawalAllowed}
-                    onChange={handleToggleEarly}
-                    label="Allow early withdrawal"
-                    disabled={!canManage}
-                    busy={earlyMutation.isPending}
-                    title={canManage ? undefined : 'Only managers can change this on active investments'}
-                  />
-                </div>
+                )}
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Customers can close an investment at any time. Closing it before maturity deducts the early withdrawal
+                  fee; after maturity the capital is paid in full.
+                </p>
                 <DetailField label="Customer Can Request Withdrawal">
                   {investment.canRequestWithdrawal ? 'Yes' : 'No'}
                 </DetailField>
               </DetailSection>
             </div>
+
+            {investment.payoutMode === 'DAILY' && (
+              <DetailSection title="Daily profit credits">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                  <span>
+                    {investment.creditsPerCycle ? (
+                      <>
+                        <span className="font-bold text-slate-900 dark:text-white tabular-nums">
+                          {investment.creditsThisCycle} of {investment.creditsPerCycle}
+                        </span>{' '}
+                        credits this month (cycle {investment.currentCycle + 1}) · {investment.creditedDays} in total
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-bold text-slate-900 dark:text-white tabular-nums">
+                          {investment.creditedDays} of {investment.profitDays}
+                        </span>{' '}
+                        working days credited
+                      </>
+                    )}{' '}
+                    · {formatINR(investment.dailyProfit)} per day
+                  </span>
+                  {investment.nextCreditAt && (
+                    <span className={`inline-flex items-center gap-1 font-semibold ${investment.nextCreditDue ? 'text-brand-600 dark:text-brand-400' : 'text-slate-500'}`}>
+                      <Clock className="w-3 h-3" />
+                      {investment.nextCreditDue ? 'Next credit due now (job catching up)' : `Next credit ${formatDateTime(investment.nextCreditAt)}`}
+                    </span>
+                  )}
+                </div>
+                {(investment.profitCredits || []).length === 0 ? (
+                  <p className="text-[11px] text-slate-500 mt-2">
+                    Nothing credited yet. The first credit lands on the first working day after the start date at 6:00 AM IST.
+                  </p>
+                ) : (
+                  <div className="mt-2 max-h-56 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                    <table className="w-full text-xs">
+                      <thead className={theadClass}>
+                        <tr>
+                          <th className="py-2 px-3 text-left">#</th>
+                          <th className="py-2 px-3 text-left">Profit day</th>
+                          <th className="py-2 px-3 text-left">Credited at</th>
+                          <th className="py-2 px-3 text-right">Amount</th>
+                          <th className="py-2 px-3 text-right">Ledger</th>
+                        </tr>
+                      </thead>
+                      <tbody className={tbodyClass}>
+                        {(investment.profitCredits || []).map((c, i, arr) => (
+                          <tr key={c.id}>
+                            <td className="py-2 px-3 text-slate-400 tabular-nums">{arr.length - i}</td>
+                            <td className="py-2 px-3 text-slate-800 dark:text-slate-200">{formatDate(c.creditDay)}</td>
+                            <td className="py-2 px-3 text-slate-500">{formatDateTime(c.creditedAt)}</td>
+                            <td className={`py-2 px-3 ${numCellClass} text-emerald-600 dark:text-emerald-400 font-semibold`}>+{formatINR(c.amount)}</td>
+                            <td className={`py-2 px-3 ${numCellClass} text-slate-400`}>{c.walletTransactionId ? `#${c.walletTransactionId}` : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </DetailSection>
+            )}
 
             {investment.cancelReason && (
               <div className="p-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 rounded-xl">
@@ -233,7 +343,9 @@ export const InvestmentDetailModal: React.FC<InvestmentDetailModalProps> = ({ in
                     <thead className={theadClass}>
                       <tr>
                         <th className="py-3 px-3.5">Reference</th>
-                        <th className="py-3 px-3.5 text-right">Total</th>
+                        <th className="py-3 px-3.5 text-right">Gross</th>
+                        <th className="py-3 px-3.5 text-right">Fee</th>
+                        <th className="py-3 px-3.5 text-right">Net</th>
                         <th className="py-3 px-3.5">Status</th>
                         <th className="py-3 px-3.5">Requested</th>
                         <th className="py-3 px-3.5">Completed</th>
@@ -245,8 +357,14 @@ export const InvestmentDetailModal: React.FC<InvestmentDetailModalProps> = ({ in
                           <td className="py-3 px-3.5 font-mono font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">
                             {w.reference}
                           </td>
-                          <td className={`py-3 px-3.5 font-bold text-slate-900 dark:text-white ${numCellClass}`}>
+                          <td className={`py-3 px-3.5 text-slate-700 dark:text-slate-300 ${numCellClass}`}>
                             {formatINR(w.totalAmount)}
+                          </td>
+                          <td className={`py-3 px-3.5 text-rose-600 dark:text-rose-400 ${numCellClass}`}>
+                            {Number(w.feeAmount) > 0 ? `-${formatINR(w.feeAmount)}` : '—'}
+                          </td>
+                          <td className={`py-3 px-3.5 font-bold text-slate-900 dark:text-white ${numCellClass}`}>
+                            {formatINR(w.netAmount ?? w.totalAmount)}
                           </td>
                           <td className="py-3 px-3.5">
                             <FinanceStatusBadge status={w.status} />

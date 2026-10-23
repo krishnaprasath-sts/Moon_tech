@@ -131,10 +131,19 @@ export const WithdrawalDetailModal: React.FC<WithdrawalDetailModalProps> = ({ wi
           <>
             <div className="flex flex-wrap items-center gap-2">
               <FinanceStatusBadge status={withdrawal.status} />
-              {withdrawal.isEarly && (
+              <span
+                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                  withdrawal.bucket === 'CAPITAL'
+                    ? 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/20'
+                    : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20'
+                }`}
+              >
+                {withdrawal.bucket === 'CAPITAL' ? 'Capital withdrawal' : 'Profit withdrawal'}
+              </span>
+              {withdrawal.isEarly && withdrawal.source !== 'WALLET' && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
                   <AlertTriangle className="w-3 h-3" />
-                  Early withdrawal
+                  Before maturity
                 </span>
               )}
               <span className="text-[11px] text-slate-500 dark:text-slate-400">Requested {formatDateTime(withdrawal.createdAt)}</span>
@@ -143,19 +152,29 @@ export const WithdrawalDetailModal: React.FC<WithdrawalDetailModalProps> = ({ wi
             {/* Amount summary */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
-                <p className="text-[11px] uppercase font-semibold text-slate-500">Principal</p>
-                <p className="text-lg font-bold font-mono tabular-nums text-slate-900 dark:text-white">{formatINR(withdrawal.principalAmount)}</p>
+                <p className="text-[11px] uppercase font-semibold text-slate-500">Gross</p>
+                <p className="text-lg font-bold font-mono tabular-nums text-slate-900 dark:text-white">{formatINR(withdrawal.totalAmount)}</p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  {formatINR(withdrawal.principalAmount)} {withdrawal.bucket === 'CAPITAL' ? 'capital' : 'profit'}
+                  {Number(withdrawal.profitAmount) > 0 ? ` + ${formatINR(withdrawal.profitAmount)} profit` : ''}
+                </p>
               </div>
-              <div className="p-4 rounded-2xl bg-emerald-500/5 border border-emerald-500/20">
-                <p className="text-[11px] uppercase font-semibold text-slate-500">Profit</p>
-                <p className="text-lg font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">+{formatINR(withdrawal.profitAmount)}</p>
+              <div className="p-4 rounded-2xl bg-rose-500/5 border border-rose-500/20">
+                <p className="text-[11px] uppercase font-semibold text-slate-500">Fee ({withdrawal.feePercent}%)</p>
+                <p className="text-lg font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400">
+                  {Number(withdrawal.feeAmount) > 0 ? `-${formatINR(withdrawal.feeAmount)}` : formatINR(0)}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  {Number(withdrawal.feeAmount) > 0 ? 'Early withdrawal fee retained' : 'No fee on this withdrawal'}
+                </p>
               </div>
               <div className="p-4 rounded-2xl bg-brand-500/5 border border-brand-500/20">
-                <p className="text-[11px] uppercase font-semibold text-slate-500">Total Payable</p>
+                <p className="text-[11px] uppercase font-semibold text-slate-500">Net Payable</p>
                 <p className="text-lg font-bold font-mono tabular-nums text-brand-600 dark:text-brand-400">
-                  {formatINR(withdrawal.totalAmount)}
-                  <CopyButton value={String(withdrawal.totalAmount)} label="total payable" />
+                  {formatINR(withdrawal.netAmount)}
+                  <CopyButton value={String(withdrawal.netAmount)} label="net payable" />
                 </p>
+                <p className="text-[11px] text-slate-500 mt-1">Transfer exactly this amount</p>
               </div>
             </div>
 
@@ -204,20 +223,38 @@ export const WithdrawalDetailModal: React.FC<WithdrawalDetailModalProps> = ({ wi
                 )}
               </DetailSection>
 
-              <DetailSection title="Investment">
-                <DetailField label="Reference" mono>
-                  {withdrawal.investment?.reference || withdrawal.investmentReference}
-                </DetailField>
-                <DetailField label="Plan">{withdrawal.investment?.planName || withdrawal.planName}</DetailField>
-                {withdrawal.investment && (
+              <DetailSection title={withdrawal.source === 'WALLET' ? 'Source' : 'Investment'}>
+                {withdrawal.source === 'WALLET' ? (
+                  <DetailField label={withdrawal.bucket === 'CAPITAL' ? 'Capital wallet withdrawal' : 'Profit wallet withdrawal'}>
+                    {formatINR(withdrawal.totalAmount)} was debited from the customer&apos;s{' '}
+                    {withdrawal.bucket === 'CAPITAL' ? 'capital wallet (uninvested or returned capital)' : 'profit wallet (daily profit, referral commission)'}{' '}
+                    when the request was made. Pay {formatINR(withdrawal.netAmount)} to the destination shown, then mark
+                    it as paid. Rejecting returns the money to the same wallet automatically.
+                  </DetailField>
+                ) : (
+                  <>
+                    <DetailField label="Reference" mono>
+                      {withdrawal.investment?.reference || withdrawal.investmentReference || '—'}
+                    </DetailField>
+                    <DetailField label="Plan">{withdrawal.investment?.planName || withdrawal.planName || '—'}</DetailField>
+                  </>
+                )}
+                {withdrawal.source !== 'WALLET' && withdrawal.investment && (
                   <>
                     <DetailField label="Invested / Expected Profit">
                       {formatINR(withdrawal.investment.amount)} / +{formatINR(withdrawal.investment.expectedProfit)}
                     </DetailField>
                     <DetailField label="Maturity Amount">{formatINR(withdrawal.investment.maturityAmount)}</DetailField>
                     <DetailField label="Period">
-                      {withdrawal.investment.durationDays} days ({formatDate(withdrawal.investment.startDate)} to{' '}
-                      {formatDate(withdrawal.investment.maturityDate)})
+                      {withdrawal.investment.maturityDate
+                        ? `${withdrawal.investment.durationDays} days (${formatDate(withdrawal.investment.startDate)} to ${formatDate(
+                            withdrawal.investment.maturityDate
+                          )})`
+                        : `Open-ended, started ${formatDate(withdrawal.investment.startDate)}`}
+                    </DetailField>
+                    <DetailField label="On completion">
+                      The investment is closed; its daily profit already sits in the customer&apos;s profit wallet.
+                      Rejecting returns the investment to active and it keeps earning.
                     </DetailField>
                     <DetailField label="Investment Status">
                       <FinanceStatusBadge status={withdrawal.investment.status} />
@@ -265,8 +302,15 @@ export const WithdrawalDetailModal: React.FC<WithdrawalDetailModalProps> = ({ wi
             <>
               Approve the withdrawal of{' '}
               <strong className="text-slate-900 dark:text-white">{formatINR(withdrawal.totalAmount)}</strong> for{' '}
-              <strong className="text-slate-900 dark:text-white">{customerLabel}</strong>. After approval, send the
-              payout and mark the request as paid.
+              <strong className="text-slate-900 dark:text-white">{customerLabel}</strong>
+              {Number(withdrawal.feeAmount) > 0 ? (
+                <>
+                  {' '}
+                  (net payable <strong className="text-slate-900 dark:text-white">{formatINR(withdrawal.netAmount)}</strong> after the{' '}
+                  {withdrawal.feePercent}% fee)
+                </>
+              ) : null}
+              . After approval, send the payout and mark the request as paid.
             </>
           )
         }
@@ -275,14 +319,14 @@ export const WithdrawalDetailModal: React.FC<WithdrawalDetailModalProps> = ({ wi
         confirmText="Approve Withdrawal"
         isLoading={approveMutation.isPending}
       >
-        {withdrawal?.isEarly && (
+        {withdrawal?.isEarly && withdrawal.source !== 'WALLET' && (
           <Field
             label="Profit amount (₹)"
             htmlFor={profitId}
             optional
-            hint={`This is an early withdrawal. Leave blank to pay the principal of ${formatINR(
+            hint={`This investment is closed before maturity. Leave blank to pay the capital of ${formatINR(
               withdrawal.principalAmount
-            )} only, or enter the profit to add to the payout.`}
+            )} (less the fee) only, or enter a profit to add to the payout.`}
           >
             <input
               id={profitId}
@@ -344,7 +388,7 @@ export const WithdrawalDetailModal: React.FC<WithdrawalDetailModalProps> = ({ wi
         title={`Payment Proof - ${withdrawal?.reference || ''}`}
         subtitle={
           withdrawal
-            ? `${customerLabel} • ${formatINR(withdrawal.totalAmount)} • Ref ${withdrawal.paymentReference || '—'}`
+            ? `${customerLabel} • ${formatINR(withdrawal.netAmount)} • Ref ${withdrawal.paymentReference || '—'}`
             : undefined
         }
         downloadName={`payment_proof_${withdrawal?.reference || 'withdrawal'}`}

@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
+import os from 'os';
 import crypto from 'crypto';
 import sharp from 'sharp';
 import { config } from '../config/index.js';
@@ -31,13 +32,32 @@ export class FileService {
    * Ensures the private upload directory exists
    */
   public static async ensureStorageDir(): Promise<void> {
-    try {
-      if (!fsSync.existsSync(config.uploadDir)) {
-        await fs.mkdir(config.uploadDir, { recursive: true });
+    // Shared hosting often extracts the app as a different user, so the bundled storage folder may
+    // not be writable. Try the configured folder first, then folders the app can create itself.
+    const candidates = [
+      config.uploadDir,
+      path.join(os.homedir(), 'moontech_storage', 'kyc_documents'),
+      path.join(os.tmpdir(), 'moontech_storage', 'kyc_documents'),
+    ];
+    for (const dir of candidates) {
+      try {
+        if (!fsSync.existsSync(dir)) await fs.mkdir(dir, { recursive: true });
+        const probe = path.join(dir, `.write_test_${crypto.randomBytes(4).toString('hex')}`);
+        await fs.writeFile(probe, 'ok');
+        await fs.unlink(probe);
+        if (dir !== config.uploadDir) {
+          logger.warn(
+            `Upload directory ${config.uploadDir} is not writable; using ${dir} instead. ` +
+              `Set UPLOAD_DIR in .env to a folder the app can write to make this permanent.`
+          );
+          config.uploadDir = dir;
+        }
+        return;
+      } catch (err: any) {
+        logger.error(`Storage directory ${dir} is not usable (${err?.code || err?.message}).`);
       }
-    } catch (err) {
-      logger.error('Failed to create storage directory', err);
     }
+    logger.error('No writable storage directory found. Uploads (KYC, receipts, QR) will fail until UPLOAD_DIR points to a writable folder.');
   }
 
   /**
@@ -47,7 +67,7 @@ export class FileService {
   public static async processAndSaveKycFile(
     userId: number,
     file: Express.Multer.File,
-    fileType: 'PASSBOOK' | 'PAN' | 'AADHAAR'
+    fileType: 'PASSBOOK' | 'PAN' | 'AADHAAR' | 'AADHAAR_BACK'
   ): Promise<ProcessedFileInfo> {
     await this.ensureStorageDir();
 
@@ -173,6 +193,39 @@ export class FileService {
       mimeType: finalMimeType,
       fileSize: finalBuffer.length,
     };
+  }
+
+  /**
+   * Stores the admin-uploaded UPI QR image as a PNG (max 800px) and returns its file name.
+   */
+  public static async saveUpiQrImage(file: Express.Multer.File): Promise<string> {
+    await this.ensureStorageDir();
+    if (!file.buffer || file.buffer.length === 0) throw new BadRequestError('Uploaded file is empty');
+
+    let buffer: Buffer;
+    try {
+      buffer = await sharp(file.buffer)
+        .rotate()
+        .resize({ width: 800, height: 800, fit: 'inside', withoutEnlargement: true })
+        .png({ compressionLevel: 9 })
+        .toBuffer();
+    } catch {
+      throw new BadRequestError('Uploaded image could not be read. Please upload a valid JPEG, PNG or WEBP file.');
+    }
+
+    const fileName = `upi_qr_${crypto.randomBytes(12).toString('hex')}.png`;
+    await fs.writeFile(path.join(config.uploadDir, fileName), buffer);
+    return fileName;
+  }
+
+  /** Deletes a previously stored UPI QR image; missing files are ignored */
+  public static async deleteUpiQrImage(fileName: string): Promise<void> {
+    if (!fileName || !fileName.startsWith('upi_qr_')) return;
+    try {
+      await fs.unlink(path.join(config.uploadDir, path.basename(fileName)));
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') logger.warn(`Could not delete old UPI QR image ${fileName}: ${err.message}`);
+    }
   }
 
   /**

@@ -3,6 +3,8 @@ import { Response } from 'express';
 import { sendResponse } from '../utils/response.js';
 import { asyncHandler, getRequestMeta, parseIdParam } from '../utils/http.js';
 import { SettingsService } from '../services/settingsService.js';
+import { FileService } from '../services/fileService.js';
+import { NotFoundError } from '../utils/errors.js';
 import { WalletService } from '../services/walletService.js';
 import { DepositService } from '../services/depositService.js';
 import { InvestmentPlanService } from '../services/investmentPlanService.js';
@@ -10,6 +12,7 @@ import { InvestmentService } from '../services/investmentService.js';
 import { WithdrawalService } from '../services/withdrawalService.js';
 import { NotificationService } from '../services/notificationService.js';
 import { ProfileService } from '../services/profileService.js';
+import { DailyPayoutService } from '../services/dailyPayoutService.js';
 
 function streamFile(res: Response, file: { fullPath: string; mimeType: string }, name: string) {
   res.setHeader('Content-Type', file.mimeType);
@@ -39,8 +42,23 @@ export class FinanceController {
           maxTopup: settings.walletMaxTopup,
           upiId: settings.upiId,
           upiPayeeName: settings.upiPayeeName,
+          // Admin-uploaded QR image (API path, relative to the API base); null = QR generated from the UPI ID
+          upiQrImageUrl: SettingsService.upiQrImagePath(settings),
           depositInstructions: settings.depositInstructions,
+          // Bank transfer destination (only when the admin has configured it)
+          bankTransferEnabled: SettingsService.bankTransferEnabled(settings),
+          bankAccountName: settings.bankAccountName,
+          bankAccountNumber: settings.bankAccountNumber,
+          bankIfsc: settings.bankIfsc,
+          bankName: settings.bankName,
+          bankTransferInstructions: settings.bankTransferInstructions,
           requireKycForInvestment: settings.requireKycForInvestment,
+          requireKycForWithdrawal: settings.requireKycForWithdrawal,
+          minWithdrawal: settings.walletMinWithdrawal,
+          referralCommissionPercent: settings.referralCommissionPercent,
+          // Deducted from capital withdrawals; profit withdrawals are free
+          capitalWithdrawalFeePercent: settings.capitalWithdrawalFeePercent,
+          payoutSchedule: DailyPayoutService.scheduleDescription(),
         },
       },
     });
@@ -80,6 +98,20 @@ export class FinanceController {
     const depositId = parseIdParam(req.params.id, 'payment ID');
     const file = await DepositService.getReceiptFile(depositId, req.user!);
     streamFile(res, file, 'payment_receipt');
+  });
+
+  /** Public: the admin-uploaded UPI QR image. The file name doubles as the access key. */
+  public static getUpiQrImage = asyncHandler(async (req, res) => {
+    const settings = await SettingsService.getSettings();
+    const requested = String(req.params.file || '');
+    if (!settings.upiQrImage || requested !== settings.upiQrImage) {
+      throw new NotFoundError('UPI QR image not found');
+    }
+    const file = await FileService.getSecureFile(settings.upiQrImage);
+    res.setHeader('Content-Type', file.mimeType);
+    // The name changes with every upload, so the image can be cached for a long time
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    fs.createReadStream(file.fullPath).pipe(res);
   });
 
   // ------------------------------------------------------------------ Plans
@@ -126,6 +158,18 @@ export class FinanceController {
   });
 
   // ------------------------------------------------------------ Withdrawals
+  public static requestWalletWithdrawal = asyncHandler(async (req, res) => {
+    const withdrawal = await WithdrawalService.requestWalletWithdrawal(req.user!.id, req.body, getRequestMeta(req));
+    sendResponse({
+      res,
+      statusCode: 201,
+      message: `${withdrawal.bucket === 'CAPITAL' ? 'Capital' : 'Profit'} withdrawal request ${
+        withdrawal.reference
+      } submitted successfully. The amount is reserved until it is paid.`,
+      data: withdrawal,
+    });
+  });
+
   public static requestWithdrawal = asyncHandler(async (req, res) => {
     const investmentId = parseIdParam(req.params.id, 'investment ID');
     const withdrawal = await WithdrawalService.requestWithdrawal(

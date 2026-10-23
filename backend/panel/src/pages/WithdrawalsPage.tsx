@@ -32,8 +32,7 @@ const EMPTY_TEXT: Record<string, string> = {
 
 export const WithdrawalsPage: React.FC = () => {
   const [page, setPage] = useState(1);
-  // Default to the pending queue - these requests are waiting for a decision
-  const [activeTab, setActiveTab] = useState<string>('PENDING');
+  const [activeTab, setActiveTab] = useState<string>('ALL');
   const [search, setSearch] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -55,12 +54,12 @@ export const WithdrawalsPage: React.FC = () => {
   const counts = data?.counts;
   const hasCounts = !!counts && Object.keys(counts).length > 0;
   const tabs = [
-    ...STATUS_TABS.map((tab) => ({ ...tab, count: counts?.[tab.id] })),
     {
       id: 'ALL',
       label: 'All Requests',
       count: hasCounts ? Object.values(counts).reduce((sum, n) => sum + (Number(n) || 0), 0) : undefined,
     },
+    ...STATUS_TABS.map((tab) => ({ ...tab, count: counts?.[tab.id] })),
   ];
 
   const withdrawals = data?.withdrawals || [];
@@ -120,10 +119,10 @@ export const WithdrawalsPage: React.FC = () => {
               <tr>
                 <th className="py-3.5 px-4">Reference</th>
                 <th className="py-3.5 px-4">Customer</th>
-                <th className="py-3.5 px-4">Investment</th>
-                <th className="py-3.5 px-4 text-right">Principal</th>
-                <th className="py-3.5 px-4 text-right">Profit</th>
-                <th className="py-3.5 px-4 text-right">Total Payable</th>
+                <th className="py-3.5 px-4">Source</th>
+                <th className="py-3.5 px-4 text-right">Gross</th>
+                <th className="py-3.5 px-4 text-right">Fee</th>
+                <th className="py-3.5 px-4 text-right">Net Payable</th>
                 <th className="py-3.5 px-4">Payout</th>
                 <th className="py-3.5 px-4">Status</th>
                 <th className="py-3.5 px-4">Requested</th>
@@ -159,9 +158,9 @@ export const WithdrawalsPage: React.FC = () => {
                     <tr key={w.id} className={trClass}>
                       <td className="py-3.5 px-4 font-mono font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">
                         {w.reference}
-                        {w.isEarly && (
+                        {w.isEarly && w.source !== 'WALLET' && (
                           <div className="text-[10px] font-sans font-bold text-amber-600 dark:text-amber-400">
-                            Early withdrawal
+                            Before maturity
                           </div>
                         )}
                       </td>
@@ -170,17 +169,38 @@ export const WithdrawalsPage: React.FC = () => {
                         <div className="text-[11px] text-slate-500 dark:text-slate-400 break-all">{w.customerEmail}</div>
                       </td>
                       <td className="py-3.5 px-4">
-                        <div className="font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">{w.investmentReference}</div>
-                        <div className="text-[10px] text-slate-400">{w.planName}</div>
+                        {w.source === 'WALLET' ? (
+                          <>
+                            <div
+                              className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold uppercase tracking-wide ${
+                                w.bucket === 'CAPITAL'
+                                  ? 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/20'
+                                  : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20'
+                              }`}
+                            >
+                              {w.bucket === 'CAPITAL' ? 'Capital wallet' : 'Profit wallet'}
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">Amount already reserved</div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">{w.investmentReference}</div>
+                            <div className="text-[10px] text-slate-400">{w.planName} · capital</div>
+                          </>
+                        )}
                       </td>
                       <td className={`py-3.5 px-4 text-slate-700 dark:text-slate-300 ${numCellClass}`}>
-                        {formatINR(w.principalAmount)}
+                        {formatINR(w.totalAmount)}
+                        {Number(w.profitAmount) > 0 && (
+                          <div className="text-[10px] text-emerald-600 dark:text-emerald-400">incl. +{formatINR(w.profitAmount)} profit</div>
+                        )}
                       </td>
-                      <td className={`py-3.5 px-4 font-bold text-emerald-600 dark:text-emerald-400 ${numCellClass}`}>
-                        +{formatINR(w.profitAmount)}
+                      <td className={`py-3.5 px-4 font-bold text-rose-600 dark:text-rose-400 ${numCellClass}`}>
+                        {Number(w.feeAmount) > 0 ? `-${formatINR(w.feeAmount)}` : '—'}
+                        {Number(w.feeAmount) > 0 && <div className="text-[10px] font-normal text-slate-400">{w.feePercent}%</div>}
                       </td>
                       <td className={`py-3.5 px-4 font-bold text-slate-900 dark:text-white ${numCellClass}`}>
-                        {formatINR(w.totalAmount)}
+                        {formatINR(w.netAmount)}
                       </td>
                       <td className="py-3.5 px-4">
                         <span className="font-bold text-slate-800 dark:text-slate-200">{w.payoutMethod}</span>

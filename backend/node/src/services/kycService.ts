@@ -1,22 +1,66 @@
 import { Op } from 'sequelize';
 import { User, CustomerProfile, KycProfile, KycReview } from '../models/index.js';
-import { KycStatus, KycReviewAction, UserRole, KycFilterParams } from '../types/index.js';
-import { encryptData } from '../utils/encryption.js';
+import { KycStatus, KycReviewAction, UserRole, KycFilterParams, NotificationType, JwtUserPayload } from '../types/index.js';
+import { encryptData, decryptData } from '../utils/encryption.js';
+import { NotificationService } from './notificationService.js';
 import { extractPanLast4, extractAadhaarLast4, extractBankAccountLast4, maskPan, maskAadhaar, maskBankAccount } from '../utils/mask.js';
 import { BadRequestError, ForbiddenError, NotFoundError } from '../utils/errors.js';
 import { FileService } from './fileService.js';
 import { ActivityLogService } from './activityLogService.js';
 import { EmailService } from './emailService.js';
+import { identityHash } from '../utils/identityHash.js';
 import { KycSubmitInput, ManualKycSubmitInput, KycVerifyInput, KycRejectInput, KycResubmitInput } from '../validators/kycValidators.js';
 
+/** Plain-language guidance shown to the customer for each KYC state. */
+const NEXT_STEP: Record<string, string> = {
+  [KycStatus.DRAFT]: 'Complete your KYC by uploading your PAN card, Aadhaar card (front and back) and bank passbook.',
+  [KycStatus.PENDING]: 'Your documents are in the review queue. Verification usually completes within 1 working day.',
+  [KycStatus.UNDER_REVIEW]: 'A reviewer is checking your documents right now. No action is needed from you.',
+  [KycStatus.VERIFIED]: 'You are fully verified. You can invest and withdraw to your registered bank account.',
+  [KycStatus.REJECTED]: 'Your KYC was rejected. Review the reason below, fix the issue and submit again.',
+  [KycStatus.RESUBMISSION_REQUIRED]: 'Some details or documents need correction. Please resubmit the items mentioned below.',
+  [KycStatus.SUSPENDED]: 'Your KYC has been suspended. Please contact support for help.',
+};
+
 export class KycService {
+  /**
+   * One person, one account: a PAN or Aadhaar that is already on another customer's KYC
+   * (anything but a rejected submission) cannot be submitted again. This is what stops a
+   * customer from opening a second account with their own referral code.
+   */
+  private static async assertIdentityNotReused(userId: number, pan: string, aadhaarReference: string): Promise<void> {
+    const panHash = identityHash(pan);
+    const aadhaar = aadhaarReference.trim();
+    const conditions: any[] = [];
+    if (panHash) conditions.push({ pan_hash: panHash });
+    if (aadhaar) conditions.push({ aadhaar_reference: aadhaar });
+    if (conditions.length === 0) return;
+    const clash = await KycProfile.findOne({
+      where: {
+        user_id: { [Op.ne]: userId },
+        kyc_status: { [Op.ne]: KycStatus.REJECTED },
+        [Op.or]: conditions,
+      },
+      attributes: ['id', 'user_id', 'pan_hash', 'aadhaar_reference'],
+    });
+    if (clash) {
+      const what = panHash && clash.pan_hash === panHash ? 'PAN' : 'Aadhaar';
+      throw new BadRequestError(
+        `This ${what} is already registered with another MoonTech account. Only one account per person is allowed; please contact support if this is a mistake.`
+      );
+    }
+  }
+
   /**
    * Get the signed-in customer's own KYC record.
    * This is deliberately separate from getKycById(), whose argument is the
    * KYC profile primary key used by the admin review routes.
    */
   public static async getMyKyc(userId: number) {
-    const kyc = await KycProfile.findOne({ where: { user_id: userId } });
+    const kyc = await KycProfile.findOne({
+      where: { user_id: userId },
+      include: [{ model: KycReview, as: 'reviews', attributes: ['id', 'action', 'remarks', 'created_at'] }],
+    });
 
     if (!kyc) {
       return {
@@ -29,8 +73,15 @@ export class KycService {
         hasPassbook: false,
         hasPan: false,
         hasAadhaar: false,
+        hasAadhaarBack: false,
+        details: null,
+        history: [],
+        nextStep: NEXT_STEP[KycStatus.DRAFT],
       };
     }
+
+    const reviews: KycReview[] = ((kyc as any).reviews || []).slice();
+    reviews.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
     return {
       id: kyc.id,
@@ -42,6 +93,23 @@ export class KycService {
       hasPassbook: Boolean(kyc.passbook_document),
       hasPan: Boolean(kyc.pan_document),
       hasAadhaar: Boolean(kyc.aadhaar_document),
+      hasAadhaarBack: Boolean(kyc.aadhaar_back_document),
+      // What the customer submitted, masked - lets them double-check before resubmitting
+      details: {
+        maskedPan: kyc.pan_last4 ? maskPan(kyc.pan_last4) : null,
+        maskedAadhaar: kyc.aadhaar_last4 ? maskAadhaar(kyc.aadhaar_last4) : null,
+        maskedAccountNumber: kyc.bank_account_last4 ? maskBankAccount(`XXXXXXXX${kyc.bank_account_last4}`) : null,
+        accountHolderName: kyc.account_holder_name,
+        ifscCode: kyc.ifsc_code,
+      },
+      // Review timeline (customer-facing: no reviewer identities)
+      history: reviews.map((rev) => ({
+        id: rev.id,
+        action: rev.action,
+        remarks: rev.remarks,
+        createdAt: rev.created_at,
+      })),
+      nextStep: NEXT_STEP[kyc.kyc_status] || null,
     };
   }
 
@@ -63,12 +131,14 @@ export class KycService {
     if (kyc.kyc_status === KycStatus.VERIFIED) {
       throw new BadRequestError('Your KYC has already been verified and cannot be resubmitted');
     }
+    await this.assertIdentityNotReused(userId, input.pan, input.aadhaarReference);
 
     const passbookFiles = files['passbookDocument'] || files['passbook'];
     const panFiles = files['panDocument'] || files['pan'];
     const aadhaarFiles = files['aadhaarDocument'] || files['aadhaar'];
+    const aadhaarBackFiles = files['aadhaarBackDocument'] || files['aadhaarBack'];
 
-    // Require all 3 documents on initial submission
+    // Require every document on initial submission
     if (!kyc.passbook_document && (!passbookFiles || passbookFiles.length === 0)) {
       throw new BadRequestError('Bank Passbook / Statement document is required');
     }
@@ -76,13 +146,17 @@ export class KycService {
       throw new BadRequestError('PAN Card document is required');
     }
     if (!kyc.aadhaar_document && (!aadhaarFiles || aadhaarFiles.length === 0)) {
-      throw new BadRequestError('Aadhaar document is required');
+      throw new BadRequestError('Aadhaar card front image is required');
+    }
+    if (!kyc.aadhaar_back_document && (!aadhaarBackFiles || aadhaarBackFiles.length === 0)) {
+      throw new BadRequestError('Aadhaar card back image is required');
     }
 
     // Process and optimize uploaded files
     let passbookDocName = kyc.passbook_document;
     let panDocName = kyc.pan_document;
     let aadhaarDocName = kyc.aadhaar_document;
+    let aadhaarBackDocName = kyc.aadhaar_back_document;
 
     if (passbookFiles && passbookFiles[0]) {
       const saved = await FileService.processAndSaveKycFile(userId, passbookFiles[0], 'PASSBOOK');
@@ -99,6 +173,11 @@ export class KycService {
       aadhaarDocName = saved.fileName;
     }
 
+    if (aadhaarBackFiles && aadhaarBackFiles[0]) {
+      const saved = await FileService.processAndSaveKycFile(userId, aadhaarBackFiles[0], 'AADHAAR_BACK');
+      aadhaarBackDocName = saved.fileName;
+    }
+
     // Encrypt sensitive fields
     const panEncrypted = encryptData(input.pan.toUpperCase().trim());
     const bankEncrypted = encryptData(input.accountNumber.trim());
@@ -111,8 +190,9 @@ export class KycService {
     // Update KYC profile
     kyc.kyc_status = KycStatus.PENDING;
     kyc.pan_number_encrypted = panEncrypted;
+    kyc.pan_hash = identityHash(input.pan);
     kyc.pan_last4 = panLast4;
-    kyc.aadhaar_reference = maskAadhaar(input.aadhaarReference);
+    kyc.aadhaar_reference = input.aadhaarReference.trim();
     kyc.aadhaar_last4 = aadhaarLast4;
     kyc.bank_account_number_encrypted = bankEncrypted;
     kyc.bank_account_last4 = bankLast4;
@@ -121,6 +201,7 @@ export class KycService {
     kyc.passbook_document = passbookDocName;
     kyc.pan_document = panDocName;
     kyc.aadhaar_document = aadhaarDocName;
+    kyc.aadhaar_back_document = aadhaarBackDocName;
     kyc.submitted_at = new Date();
     kyc.rejection_reason = null;
 
@@ -172,10 +253,12 @@ export class KycService {
     if (!kyc) {
       kyc = await KycProfile.create({ user_id: input.customerId, kyc_status: KycStatus.DRAFT });
     }
+    await this.assertIdentityNotReused(input.customerId, input.pan, input.aadhaarReference);
 
     const passbookFiles = files['passbookDocument'] || files['passbook'];
     const panFiles = files['panDocument'] || files['pan'];
     const aadhaarFiles = files['aadhaarDocument'] || files['aadhaar'];
+    const aadhaarBackFiles = files['aadhaarBackDocument'] || files['aadhaarBack'];
 
     let passbookDocName = kyc.passbook_document;
     let panDocName = kyc.pan_document;
@@ -195,6 +278,11 @@ export class KycService {
       const saved = await FileService.processAndSaveKycFile(input.customerId, aadhaarFiles[0], 'AADHAAR');
       aadhaarDocName = saved.fileName;
     }
+    let aadhaarBackDocName = kyc.aadhaar_back_document;
+    if (aadhaarBackFiles && aadhaarBackFiles[0]) {
+      const saved = await FileService.processAndSaveKycFile(input.customerId, aadhaarBackFiles[0], 'AADHAAR_BACK');
+      aadhaarBackDocName = saved.fileName;
+    }
 
     // Encrypt sensitive fields
     const panEncrypted = encryptData(input.pan.toUpperCase().trim());
@@ -208,8 +296,9 @@ export class KycService {
 
     kyc.kyc_status = isDirectVerify ? KycStatus.VERIFIED : KycStatus.PENDING;
     kyc.pan_number_encrypted = panEncrypted;
+    kyc.pan_hash = identityHash(input.pan);
     kyc.pan_last4 = panLast4;
-    kyc.aadhaar_reference = maskAadhaar(input.aadhaarReference);
+    kyc.aadhaar_reference = input.aadhaarReference.trim();
     kyc.aadhaar_last4 = aadhaarLast4;
     kyc.bank_account_number_encrypted = bankEncrypted;
     kyc.bank_account_last4 = bankLast4;
@@ -218,6 +307,7 @@ export class KycService {
     kyc.passbook_document = passbookDocName;
     kyc.pan_document = panDocName;
     kyc.aadhaar_document = aadhaarDocName;
+    kyc.aadhaar_back_document = aadhaarBackDocName;
     kyc.submitted_at = new Date();
     kyc.rejection_reason = null;
 
@@ -344,7 +434,7 @@ export class KycService {
         referralCode: p?.referral_code || 'N/A',
         panMasked: item.pan_last4 ? maskPan(item.pan_last4) : 'N/A',
         aadhaarMasked: item.aadhaar_last4 ? maskAadhaar(item.aadhaar_last4) : 'N/A',
-        bankAccountMasked: item.bank_account_last4 ? maskBankAccount(item.bank_account_last4) : 'N/A',
+        bankAccountMasked: item.bank_account_last4 ? maskBankAccount(`XXXXXXXX${item.bank_account_last4}`) : 'N/A',
         accountHolderName: item.account_holder_name,
         ifscCode: item.ifsc_code,
         submittedAt: item.submitted_at,
@@ -354,6 +444,7 @@ export class KycService {
         hasPassbookDoc: Boolean(item.passbook_document),
         hasPanDoc: Boolean(item.pan_document),
         hasAadhaarDoc: Boolean(item.aadhaar_document),
+        hasAadhaarBackDoc: Boolean(item.aadhaar_back_document),
         createdAt: item.created_at,
         updatedAt: item.updated_at,
       };
@@ -380,7 +471,11 @@ export class KycService {
   /**
    * Get complete KYC details by ID (including review audit history)
    */
-  public static async getKycById(kycId: number) {
+  public static async getKycById(kycId: number, requestingUser?: JwtUserPayload) {
+    // Managers verify payouts against the real account number; editors only see the mask
+    const canSeeFullAccount = Boolean(
+      requestingUser && [UserRole.SUPER_ADMIN, UserRole.ADMIN].includes(requestingUser.role)
+    );
     const kyc = await KycProfile.findByPk(kycId, {
       include: [
         {
@@ -444,15 +539,24 @@ export class KycService {
         lastLoginAt: u?.last_login_at,
       },
       bankDetails: {
-        maskedAccountNumber: kyc.bank_account_last4 ? maskBankAccount(kyc.bank_account_last4) : 'N/A',
+        maskedAccountNumber: kyc.bank_account_last4 ? maskBankAccount(`XXXXXXXX${kyc.bank_account_last4}`) : 'N/A',
+        accountNumber:
+          canSeeFullAccount && kyc.bank_account_number_encrypted
+            ? decryptData(kyc.bank_account_number_encrypted) || null
+            : null,
         last4: kyc.bank_account_last4,
         accountHolderName: kyc.account_holder_name,
         ifscCode: kyc.ifsc_code,
       },
       identityDetails: {
         maskedPan: kyc.pan_last4 ? maskPan(kyc.pan_last4) : 'N/A',
+        panNumber:
+          canSeeFullAccount && kyc.pan_number_encrypted
+            ? decryptData(kyc.pan_number_encrypted) || null
+            : null,
         panLast4: kyc.pan_last4,
         maskedAadhaar: kyc.aadhaar_last4 ? maskAadhaar(kyc.aadhaar_last4) : 'N/A',
+        aadhaarNumber: canSeeFullAccount ? kyc.aadhaar_reference : null,
         aadhaarLast4: kyc.aadhaar_last4,
       },
       documents: {
@@ -467,6 +571,10 @@ export class KycService {
         aadhaar: {
           available: Boolean(kyc.aadhaar_document),
           viewUrl: kyc.aadhaar_document ? `/api/admin/kyc/${kyc.id}/document/aadhaar` : null,
+        },
+        aadhaarBack: {
+          available: Boolean(kyc.aadhaar_back_document),
+          viewUrl: kyc.aadhaar_back_document ? `/api/admin/kyc/${kyc.id}/document/aadhaar-back` : null,
         },
       },
       reviewInfo: {
@@ -540,6 +648,14 @@ export class KycService {
     if (u) {
       EmailService.sendKycStatusUpdate(u.email, p?.full_name || 'Customer', 'VERIFIED', input.remarks || undefined).catch(() => {});
     }
+    await NotificationService.notify({
+      userId: kyc.user_id,
+      type: NotificationType.KYC_VERIFIED,
+      title: 'KYC verified',
+      message: 'Your KYC has been verified. You can now invest in plans and withdraw money to your registered bank account or UPI ID.',
+      relatedEntity: 'KYC_PROFILE',
+      relatedId: kyc.id,
+    });
 
     return {
       id: kyc.id,
@@ -598,6 +714,14 @@ export class KycService {
     if (u) {
       EmailService.sendKycStatusUpdate(u.email, p?.full_name || 'Customer', 'REJECTED', input.rejectionReason).catch(() => {});
     }
+    await NotificationService.notify({
+      userId: kyc.user_id,
+      type: NotificationType.KYC_REJECTED,
+      title: 'KYC rejected',
+      message: `Your KYC was rejected. Reason: ${input.rejectionReason}. Please correct the details and submit your KYC again.`,
+      relatedEntity: 'KYC_PROFILE',
+      relatedId: kyc.id,
+    });
 
     return {
       id: kyc.id,
@@ -657,6 +781,14 @@ export class KycService {
     if (u) {
       EmailService.sendKycStatusUpdate(u.email, p?.full_name || 'Customer', 'RESUBMISSION_REQUIRED', input.remarks).catch(() => {});
     }
+    await NotificationService.notify({
+      userId: kyc.user_id,
+      type: NotificationType.KYC_RESUBMISSION_REQUIRED,
+      title: 'KYC needs resubmission',
+      message: `Our team needs you to resubmit your KYC. Remarks: ${input.remarks}`,
+      relatedEntity: 'KYC_PROFILE',
+      relatedId: kyc.id,
+    });
 
     return {
       id: kyc.id,
@@ -672,7 +804,7 @@ export class KycService {
    */
   public static async getSecureDocument(
     kycId: number,
-    documentType: 'passbook' | 'pan' | 'aadhaar',
+    documentType: 'passbook' | 'pan' | 'aadhaar' | 'aadhaar-back',
     requestingUser: { id: number; role: UserRole }
   ) {
     const kyc = await KycProfile.findByPk(kycId);
@@ -689,6 +821,7 @@ export class KycService {
     if (documentType === 'passbook') fileName = kyc.passbook_document;
     else if (documentType === 'pan') fileName = kyc.pan_document;
     else if (documentType === 'aadhaar') fileName = kyc.aadhaar_document;
+    else if (documentType === 'aadhaar-back') fileName = kyc.aadhaar_back_document;
     else throw new BadRequestError('Invalid document type requested');
 
     if (!fileName) {

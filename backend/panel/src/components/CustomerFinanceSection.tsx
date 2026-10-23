@@ -4,6 +4,7 @@ import { Wallet, SlidersHorizontal, ExternalLink } from 'lucide-react';
 import { useCustomerFinance } from '../hooks/useFinance';
 import { FinanceStatusBadge } from './FinanceStatusBadge';
 import { WalletAdjustModal } from './WalletAdjustModal';
+import { CopyButton } from './CopyButton';
 import { useAuth } from '../context/AuthContext';
 import { ErrorState, ViewOnlyNote, btnSecondaryClass, numCellClass, theadClass, tbodyClass, trClass } from './ui';
 import { formatINR, formatDate, formatDateTime, formatNumber, getApiErrorMessage, humanize } from '../utils/finance';
@@ -25,9 +26,23 @@ export const CustomerFinanceSection: React.FC<CustomerFinanceSectionProps> = ({ 
     ? [
         { label: 'Invested (Active)', value: formatINR(finance.summary.investedAmount) },
         { label: 'Expected Profit', value: formatINR(finance.summary.expectedProfit) },
-        { label: 'Total Deposited', value: formatINR(finance.summary.totalDeposited) },
+        { label: 'Daily Profit Credited', value: formatINR(finance.summary.dailyProfitCredited ?? 0) },
         { label: 'Total Profit Paid', value: formatINR(finance.summary.totalProfitPaid) },
-        { label: 'Total Withdrawn', value: formatINR(finance.summary.totalWithdrawn) },
+        {
+          label: 'Referral Commission',
+          value:
+            Number(finance.summary.referralCommissionPending) > 0
+              ? `${formatINR(finance.summary.referralCommissionEarned ?? 0)} (+${formatINR(finance.summary.referralCommissionPending)} pending)`
+              : formatINR(finance.summary.referralCommissionEarned ?? 0),
+        },
+        { label: 'Total Deposited', value: formatINR(finance.summary.totalDeposited) },
+        {
+          label: 'Total Withdrawn (net)',
+          value:
+            Number(finance.summary.totalWithdrawalFees) > 0
+              ? `${formatINR(finance.summary.totalWithdrawn)} (${formatINR(finance.summary.totalWithdrawalFees)} fees)`
+              : formatINR(finance.summary.totalWithdrawn),
+        },
         { label: 'Investments', value: formatNumber(finance.summary.investmentsCount) },
       ]
     : [];
@@ -76,13 +91,23 @@ export const CustomerFinanceSection: React.FC<CustomerFinanceSectionProps> = ({ 
             <div className="p-5 rounded-2xl bg-gradient-to-tr from-brand-600 to-blue-600 text-white shadow-lg shadow-brand-500/20">
               <p className="text-[11px] uppercase font-semibold tracking-wider text-white/80">Wallet Balance</p>
               <p className="text-2xl font-black font-mono tabular-nums mt-1 break-words">{formatINR(finance.walletBalance)}</p>
+              <dl className="grid grid-cols-2 gap-2 mt-3 text-[11px]">
+                <div>
+                  <dt className="text-white/70 uppercase tracking-wide">Capital</dt>
+                  <dd className="font-mono font-bold tabular-nums">{formatINR(finance.capitalBalance ?? 0)}</dd>
+                </div>
+                <div>
+                  <dt className="text-white/70 uppercase tracking-wide">Profit</dt>
+                  <dd className="font-mono font-bold tabular-nums">{formatINR(finance.profitBalance ?? 0)}</dd>
+                </div>
+              </dl>
               <p className="text-[11px] text-white/80 mt-2">
                 {formatNumber(finance.summary.recentCreditsCount)} recent credit
                 {Number(finance.summary.recentCreditsCount) === 1 ? '' : 's'}
               </p>
             </div>
 
-            <div className="lg:col-span-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="lg:col-span-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
               {summaryItems.map((item) => (
                 <div
                   key={item.label}
@@ -118,7 +143,15 @@ export const CustomerFinanceSection: React.FC<CustomerFinanceSectionProps> = ({ 
                 </div>
                 <div>
                   <span className="text-slate-500 block text-[11px] uppercase">Account Number</span>
-                  <span className="font-mono text-slate-800 dark:text-slate-200">{payout.accountNumberMasked || '—'}</span>
+                  <span className="font-mono text-slate-800 dark:text-slate-200 select-all">
+                    {payout.accountNumber || payout.accountNumberMasked || '—'}
+                    {payout.accountNumber && <CopyButton value={payout.accountNumber} label="account number" />}
+                  </span>
+                  {payout.accountNumber ? (
+                    <span className="block text-[10px] text-slate-400">Full number shown to managers for manual payouts</span>
+                  ) : payout.accountNumberMasked ? (
+                    <span className="block text-[10px] text-slate-400">Masked for view-only roles</span>
+                  ) : null}
                 </div>
                 <div>
                   <span className="text-slate-500 block text-[11px] uppercase">IFSC</span>
@@ -130,7 +163,10 @@ export const CustomerFinanceSection: React.FC<CustomerFinanceSectionProps> = ({ 
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-slate-500">This customer has not registered bank or UPI payout details yet.</p>
+              <p className="text-xs text-slate-500">
+                This customer has not registered separate payout details yet. The bank account they submitted with KYC is
+                shown in the KYC card below and can be used for manual payouts.
+              </p>
             )}
           </div>
 
@@ -175,7 +211,10 @@ export const CustomerFinanceSection: React.FC<CustomerFinanceSectionProps> = ({ 
                         </td>
                         <td className="py-3 px-3.5">
                           <div className="font-bold text-slate-900 dark:text-white">{inv.planName}</div>
-                          <div className="text-[10px] text-slate-500">{inv.durationDays} days</div>
+                          <div className="text-[10px] text-slate-500">
+                            {Number(inv.durationDays) === 0 ? 'Open-ended' : `${inv.durationDays} days`}
+                            {Number(inv.lockInDays) > 0 ? ` · ${inv.lockInDays}d lock-in` : ''}
+                          </div>
                         </td>
                         <td className={`py-3 px-3.5 font-bold text-slate-900 dark:text-white ${numCellClass}`}>
                           {formatINR(inv.amount)}
@@ -190,8 +229,8 @@ export const CustomerFinanceSection: React.FC<CustomerFinanceSectionProps> = ({ 
                           {formatDate(inv.startDate)}
                         </td>
                         <td className="py-3 px-3.5 text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                          {formatDate(inv.maturityDate)}
-                          {inv.status === 'ACTIVE' && (
+                          {inv.maturityDate ? formatDate(inv.maturityDate) : 'Open-ended'}
+                          {inv.status === 'ACTIVE' && inv.maturityDate && (
                             <div className="text-[10px] text-slate-400">{inv.daysRemaining}d left</div>
                           )}
                         </td>
@@ -282,7 +321,8 @@ export const CustomerFinanceSection: React.FC<CustomerFinanceSectionProps> = ({ 
             onClose={() => setIsAdjustOpen(false)}
             userId={customerId}
             customerName={customerName}
-            walletBalance={Number(finance.walletBalance || 0)}
+            capitalBalance={Number(finance.capitalBalance || 0)}
+            profitBalance={Number(finance.profitBalance || 0)}
           />
         </>
       )}

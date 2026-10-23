@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, User, ShieldCheck, Network, ShieldAlert, Plus } from 'lucide-react';
+import { ArrowLeft, User, ShieldCheck, Network, ShieldAlert, Plus, FileText, Eye } from 'lucide-react';
 import { useCustomer } from '../hooks';
+import { kycApi, KycDocumentType } from '../api';
 import { KycStatusBadge } from '../components/KycStatusBadge';
 import { AccountStatusBadge } from '../components/AccountStatusBadge';
 import { AddManualKycModal } from '../components/AddManualKycModal';
+import { FileViewerModal } from '../components/FileViewerModal';
 import { CustomerFinanceSection } from '../components/CustomerFinanceSection';
+import { CopyButton } from '../components/CopyButton';
 import { useAuth } from '../context/AuthContext';
 import { btnPrimaryClass, btnSecondaryClass, btnGhostClass, cardClass, ViewOnlyNote } from '../components/ui';
 import { formatDate, formatDateTime, formatDateOnly, getApiErrorMessage, getErrorStatus, joinParts } from '../utils/finance';
@@ -22,6 +25,7 @@ export const CustomerDetailPage: React.FC = () => {
   const { isAdmin } = useAuth();
   const { data: customer, isLoading, isError, error, refetch } = useCustomer(id || '');
   const [isManualKycOpen, setIsManualKycOpen] = useState(false);
+  const [activeDoc, setActiveDoc] = useState<KycDocumentType | null>(null);
 
   if (isLoading) {
     return (
@@ -171,22 +175,80 @@ export const CustomerDetailPage: React.FC = () => {
           </div>
 
           {k ? (
-            <div className="space-y-3 text-xs pt-2">
-              <DetailRow label="PAN" mono>
-                {k.panMasked || '—'}
-              </DetailRow>
-              <DetailRow label="Aadhaar" mono>
-                {k.aadhaarMasked || '—'}
-              </DetailRow>
-              <DetailRow label="Bank Account" mono>
-                {k.bankAccountMasked || '—'}
-              </DetailRow>
-              <DetailRow label="Account Holder">{k.accountHolderName || '—'}</DetailRow>
-              <DetailRow label="IFSC" mono>
-                {k.ifscCode || '—'}
-              </DetailRow>
-              <DetailRow label="Submitted">{formatDateTime(k.submittedAt)}</DetailRow>
-              <DetailRow label="Reviewed">{formatDateTime(k.reviewedAt)}</DetailRow>
+            <div className="space-y-3.5 text-xs pt-2">
+              <div>
+                <span className="text-slate-500 block text-[11px] uppercase font-semibold">PAN</span>
+                <div className="flex items-center justify-between gap-2 mt-0.5">
+                  <span className="font-bold text-brand-600 dark:text-brand-300 font-mono tracking-wider text-sm select-all">
+                    {k.panNumber || k.panMasked || '—'}
+                  </span>
+                  {(k.panNumber || k.panMasked) && (
+                    <CopyButton value={k.panNumber || k.panMasked} label="PAN" />
+                  )}
+                </div>
+                {k.panNumber ? (
+                  <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">
+                    Full decrypted PAN
+                  </span>
+                ) : (
+                  <span className="block text-[10px] text-slate-400 mt-0.5">Masked for view-only roles</span>
+                )}
+              </div>
+
+              <div>
+                <span className="text-slate-500 block text-[11px] uppercase font-semibold">Aadhaar</span>
+                <div className="flex items-center justify-between gap-2 mt-0.5">
+                  <span className="font-bold tracking-wider font-mono text-sm select-all text-slate-900 dark:text-white">
+                    {k.aadhaarNumber || k.aadhaarMasked || '—'}
+                  </span>
+                  {(k.aadhaarNumber || k.aadhaarMasked) && (
+                    <CopyButton value={k.aadhaarNumber || k.aadhaarMasked} label="Aadhaar" />
+                  )}
+                </div>
+                {k.aadhaarNumber ? (
+                  <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">
+                    Full Aadhaar reference
+                  </span>
+                ) : (
+                  <span className="block text-[10px] text-slate-400 mt-0.5">Masked for view-only roles</span>
+                )}
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                <span className="text-slate-500 block text-[11px] uppercase font-semibold">Bank Account</span>
+                <div className="flex items-center justify-between gap-2 mt-0.5">
+                  <span className="select-all font-bold tracking-wider font-mono text-sm text-slate-900 dark:text-white">
+                    {k.bankAccountNumber || k.bankAccountMasked || '—'}
+                  </span>
+                  {(k.bankAccountNumber || k.bankAccountMasked) && (
+                    <CopyButton value={k.bankAccountNumber || k.bankAccountMasked} label="bank account number" />
+                  )}
+                </div>
+                <span className="block text-[10px] font-sans font-normal text-slate-400 mt-0.5">
+                  {k.bankAccountNumber ? 'From KYC · full number shown to managers for manual payouts' : 'From KYC · masked for view-only roles'}
+                </span>
+              </div>
+
+              <div>
+                <span className="text-slate-500 block text-[11px] uppercase font-semibold">Account Holder</span>
+                <div className="flex items-center justify-between gap-2 mt-0.5">
+                  <span className="text-slate-800 dark:text-slate-200 font-medium">{k.accountHolderName || '—'}</span>
+                  {k.accountHolderName && <CopyButton value={k.accountHolderName} label="account holder" />}
+                </div>
+              </div>
+
+              <div>
+                <span className="text-slate-500 block text-[11px] uppercase font-semibold">IFSC</span>
+                <div className="flex items-center justify-between gap-2 mt-0.5">
+                  <span className="font-mono font-bold text-slate-900 dark:text-white">{k.ifscCode || '—'}</span>
+                  {k.ifscCode && <CopyButton value={k.ifscCode} label="IFSC" />}
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                <DetailRow label="Submitted">{formatDateTime(k.submittedAt)}</DetailRow>
+                <DetailRow label="Reviewed">{formatDateTime(k.reviewedAt)}</DetailRow>
+              </div>
 
               {k.rejectionReason && (
                 <div className="p-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 rounded-xl">
@@ -194,6 +256,60 @@ export const CustomerDetailPage: React.FC = () => {
                     Review Notes
                   </span>
                   <p className="text-rose-700 dark:text-rose-300 text-xs">{k.rejectionReason}</p>
+                </div>
+              )}
+
+              {/* Uploaded Document Previews */}
+              {(k.hasPassbookDoc || k.hasPanDoc || k.hasAadhaarDoc) && (
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                  <span className="text-slate-500 block text-[11px] uppercase font-semibold">Uploaded Documents</span>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {k.hasPassbookDoc && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveDoc('passbook')}
+                        className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-brand-500 text-slate-700 dark:text-slate-300 text-xs transition"
+                      >
+                        <span className="flex items-center gap-2">
+                          <FileText className="w-3.5 h-3.5 text-brand-600" />
+                          Bank Passbook / Statement
+                        </span>
+                        <span className="text-[11px] text-brand-600 font-semibold flex items-center gap-1">
+                          <Eye className="w-3 h-3" /> View
+                        </span>
+                      </button>
+                    )}
+                    {k.hasPanDoc && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveDoc('pan')}
+                        className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-brand-500 text-slate-700 dark:text-slate-300 text-xs transition"
+                      >
+                        <span className="flex items-center gap-2">
+                          <FileText className="w-3.5 h-3.5 text-brand-600" />
+                          PAN Card Document
+                        </span>
+                        <span className="text-[11px] text-brand-600 font-semibold flex items-center gap-1">
+                          <Eye className="w-3 h-3" /> View
+                        </span>
+                      </button>
+                    )}
+                    {k.hasAadhaarDoc && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveDoc('aadhaar')}
+                        className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-brand-500 text-slate-700 dark:text-slate-300 text-xs transition"
+                      >
+                        <span className="flex items-center gap-2">
+                          <FileText className="w-3.5 h-3.5 text-brand-600" />
+                          Aadhaar Document
+                        </span>
+                        <span className="text-[11px] text-brand-600 font-semibold flex items-center gap-1">
+                          <Eye className="w-3 h-3" /> View
+                        </span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -248,6 +364,23 @@ export const CustomerDetailPage: React.FC = () => {
           onClose={() => setIsManualKycOpen(false)}
           preselectedCustomerId={customer.id}
           preselectedCustomerName={displayName}
+        />
+      )}
+
+      {k?.id && activeDoc && (
+        <FileViewerModal
+          isOpen={!!activeDoc}
+          onClose={() => setActiveDoc(null)}
+          url={kycApi.getDocumentPath(k.id, activeDoc)}
+          title={
+            activeDoc === 'passbook'
+              ? 'Bank Passbook / Statement'
+              : activeDoc === 'pan'
+              ? 'PAN Card Document'
+              : 'Aadhaar Document'
+          }
+          subtitle={`${displayName} • KYC #${k.id}`}
+          downloadName={`${displayName}_${activeDoc}`}
         />
       )}
     </div>

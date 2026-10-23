@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Notification, Announcement, User } from '../models/index.js';
+import { Notification, Announcement, User, CustomerProfile } from '../models/index.js';
 import { NotificationType, UserRole, UserStatus } from '../types/index.js';
 import { NotFoundError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
@@ -48,9 +48,13 @@ export class NotificationService {
         related_id: params.relatedId ?? null,
       });
 
-      const user = await User.findByPk(params.userId, { attributes: ['email'] });
+      const user = await User.findByPk(params.userId, {
+        attributes: ['email'],
+        include: [{ model: CustomerProfile, as: 'profile', attributes: ['full_name'] }],
+      });
       if (user) {
-        EmailService.sendNotificationEmail(user.email, params.title, params.message).catch(() => {});
+        const name: string | undefined = (user as any).profile?.full_name || undefined;
+        EmailService.sendNotificationEmail(user.email, params.title, params.message, params.type, name).catch(() => {});
       }
     } catch (err) {
       logger.error(`Failed to create notification for user #${params.userId}`, err);

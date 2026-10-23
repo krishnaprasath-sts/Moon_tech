@@ -66,7 +66,7 @@ export const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarOpen }) 
             {initial}
           </div>
           <div className="hidden md:block text-right min-w-0">
-            <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[200px]">{displayName}</p>
+            {/* <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[200px]">{displayName}</p> */}
             {user?.role && <RoleBadge role={user.role} className="mt-0.5" />}
           </div>
         </div>

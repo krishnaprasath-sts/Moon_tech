@@ -8,6 +8,8 @@ import {
   Deposit,
   Investment,
   Withdrawal,
+  ProfitCredit,
+  ReferralCommission,
 } from '../models/index.js';
 import {
   UserRole,
@@ -15,6 +17,7 @@ import {
   InvestmentStatus,
   WithdrawalStatus,
   WalletTxnDirection,
+  ReferralCommissionStatus,
 } from '../types/index.js';
 import { BadRequestError } from '../utils/errors.js';
 import { toPaise, fromPaise } from '../utils/money.js';
@@ -228,6 +231,8 @@ export class ReportService {
       return {
         ...customerFields(w),
         balance: w.balance,
+        capitalBalance: w.capital_balance,
+        profitBalance: w.profit_balance,
         totalCredits: fromPaise(entry.credits),
         totalDebits: fromPaise(entry.debits),
         transactionCount: entry.count,
@@ -240,6 +245,8 @@ export class ReportService {
       columns: [
         ...customerColumns,
         { key: 'balance', label: 'Current Balance', type: 'money' },
+        { key: 'capitalBalance', label: 'Capital Wallet', type: 'money' },
+        { key: 'profitBalance', label: 'Profit Wallet', type: 'money' },
         { key: 'totalCredits', label: 'Total Credits', type: 'money' },
         { key: 'totalDebits', label: 'Total Debits', type: 'money' },
         { key: 'transactionCount', label: 'Transactions', type: 'number' },
@@ -249,6 +256,8 @@ export class ReportService {
       summary: [
         { label: 'Wallets', value: rows.length, type: 'number' as const },
         { label: 'Total Balance', value: fromPaise(sumPaise(rows.map((r) => r.balance))), type: 'money' as const },
+        { label: 'Capital Wallets', value: fromPaise(sumPaise(rows.map((r) => r.capitalBalance))), type: 'money' as const },
+        { label: 'Profit Wallets', value: fromPaise(sumPaise(rows.map((r) => r.profitBalance))), type: 'money' as const },
         { label: 'Total Credits', value: fromPaise(sumPaise(rows.map((r) => r.totalCredits))), type: 'money' as const },
         { label: 'Total Debits', value: fromPaise(sumPaise(rows.map((r) => r.totalDebits))), type: 'money' as const },
       ],
@@ -311,53 +320,100 @@ export class ReportService {
   }
 
   /**
-   * Profit actually paid out, by payout completion date
+   * Profit that reached customers: daily profit credits (06:00 AM job), profit paid out with
+   * matured principal, and referral commissions. Ordered by the date the money moved.
    */
   private static async profitReport(startDate?: string, endDate?: string) {
-    const withdrawals = await Withdrawal.findAll({
-      where: {
-        status: WithdrawalStatus.COMPLETED,
-        ...this.dateWhere('completed_at', startDate, endDate),
-      },
-      limit: MAX_ROWS + 1,
-      order: [['completed_at', 'DESC']],
-      include: [userInclude, { model: Investment, as: 'investment', attributes: ['reference', 'plan_name'] }],
-    });
+    const [withdrawals, credits, commissions] = await Promise.all([
+      Withdrawal.findAll({
+        where: {
+          status: WithdrawalStatus.COMPLETED,
+          profit_amount: { [Op.gt]: 0 },
+          ...this.dateWhere('completed_at', startDate, endDate),
+        },
+        limit: MAX_ROWS + 1,
+        order: [['completed_at', 'DESC']],
+        include: [userInclude, { model: Investment, as: 'investment', attributes: ['reference', 'plan_name'] }],
+      }),
+      ProfitCredit.findAll({
+        where: this.dateWhere('created_at', startDate, endDate),
+        limit: MAX_ROWS + 1,
+        order: [['created_at', 'DESC']],
+        include: [userInclude, { model: Investment, as: 'investment', attributes: ['reference', 'plan_name', 'amount'] }],
+      }),
+      ReferralCommission.findAll({
+        where: {
+          status: ReferralCommissionStatus.CREDITED,
+          ...this.dateWhere('credited_at', startDate, endDate),
+        },
+        limit: MAX_ROWS + 1,
+        order: [['credited_at', 'DESC']],
+        include: [
+          { ...userInclude, as: 'referrer' },
+          { model: Investment, as: 'investment', attributes: ['reference', 'plan_name'] },
+        ],
+      }),
+    ]);
 
-    const rows = withdrawals.map((w: any) => ({
-      withdrawalReference: w.reference,
-      investmentReference: w.investment?.reference || '',
-      ...customerFields(w),
-      planName: w.investment?.plan_name || '',
-      principalAmount: w.principal_amount,
-      profitAmount: w.profit_amount,
-      totalPaid: w.total_amount,
-      paidAt: toIso(w.completed_at),
-    }));
+    const rows = [
+      ...credits.map((c: any) => ({
+        kind: 'Daily profit',
+        reference: `${c.investment?.reference || ''} / ${c.credit_day}`,
+        ...customerFields(c),
+        planName: c.investment?.plan_name || '',
+        principalAmount: c.investment?.amount ?? 0,
+        profitAmount: c.amount,
+        paidAt: toIso(c.created_at),
+      })),
+      ...withdrawals.map((w: any) => ({
+        kind: 'Maturity profit',
+        reference: w.reference,
+        ...customerFields(w),
+        planName: w.investment?.plan_name || '',
+        principalAmount: w.principal_amount,
+        profitAmount: w.profit_amount,
+        paidAt: toIso(w.completed_at),
+      })),
+      ...commissions.map((c: any) => ({
+        kind: 'Referral commission',
+        reference: c.investment?.reference || '',
+        ...customerFields({ user_id: c.referrer_user_id, user: c.referrer }),
+        planName: c.investment?.plan_name || '',
+        principalAmount: c.investment_amount,
+        profitAmount: c.amount,
+        paidAt: toIso(c.credited_at),
+      })),
+    ]
+      .sort((a, b) => String(b.paidAt).localeCompare(String(a.paidAt)))
+      .slice(0, MAX_ROWS + 1);
 
     return {
       title: 'Profit Report',
       columns: [
-        { key: 'withdrawalReference', label: 'Withdrawal ID' },
-        { key: 'investmentReference', label: 'Investment ID' },
+        { key: 'kind', label: 'Type' },
+        { key: 'reference', label: 'Reference' },
         ...customerColumns,
         { key: 'planName', label: 'Plan' },
         { key: 'principalAmount', label: 'Principal', type: 'money' },
         { key: 'profitAmount', label: 'Profit Paid', type: 'money' },
-        { key: 'totalPaid', label: 'Total Paid', type: 'money' },
         { key: 'paidAt', label: 'Paid On', type: 'date' },
       ] as ReportColumn[],
       rows,
       summary: [
-        { label: 'Payouts', value: rows.length, type: 'number' as const },
+        { label: 'Entries', value: rows.length, type: 'number' as const },
         {
-          label: 'Total Profit Paid',
-          value: fromPaise(sumPaise(rows.map((r) => r.profitAmount))),
+          label: 'Daily Profit Credited',
+          value: fromPaise(sumPaise(credits.map((c) => c.amount))),
           type: 'money' as const,
         },
         {
-          label: 'Total Principal Returned',
-          value: fromPaise(sumPaise(rows.map((r) => r.principalAmount))),
+          label: 'Maturity Profit Paid',
+          value: fromPaise(sumPaise(withdrawals.map((w) => w.profit_amount))),
+          type: 'money' as const,
+        },
+        {
+          label: 'Referral Commission Paid',
+          value: fromPaise(sumPaise(commissions.map((c) => c.amount))),
           type: 'money' as const,
         },
       ],
@@ -434,9 +490,12 @@ export class ReportService {
       reference: w.reference,
       investmentReference: w.investment?.reference || '',
       ...customerFields(w),
+      bucket: w.bucket,
       principalAmount: w.principal_amount,
       profitAmount: w.profit_amount,
       totalAmount: w.total_amount,
+      feeAmount: w.fee_amount,
+      netAmount: w.net_amount,
       payoutMethod: w.payout_method,
       paymentReference: w.payment_reference || '',
       status: w.status,
@@ -453,9 +512,12 @@ export class ReportService {
         { key: 'reference', label: 'Withdrawal ID' },
         { key: 'investmentReference', label: 'Investment ID' },
         ...customerColumns,
+        { key: 'bucket', label: 'Wallet' },
         { key: 'principalAmount', label: 'Principal', type: 'money' },
         { key: 'profitAmount', label: 'Profit', type: 'money' },
-        { key: 'totalAmount', label: 'Total Payable', type: 'money' },
+        { key: 'totalAmount', label: 'Gross', type: 'money' },
+        { key: 'feeAmount', label: 'Fee', type: 'money' },
+        { key: 'netAmount', label: 'Net Payable', type: 'money' },
         { key: 'payoutMethod', label: 'Payout Method' },
         { key: 'paymentReference', label: 'Payment Ref' },
         { key: 'status', label: 'Status' },
@@ -465,8 +527,9 @@ export class ReportService {
       rows,
       summary: [
         { label: 'Requests', value: rows.length, type: 'number' as const },
-        { label: 'Paid Out', value: fromPaise(sumPaise(completed.map((r) => r.totalAmount))), type: 'money' as const },
-        { label: 'Awaiting Payout', value: fromPaise(sumPaise(open.map((r) => r.totalAmount))), type: 'money' as const },
+        { label: 'Paid Out (net)', value: fromPaise(sumPaise(completed.map((r) => r.netAmount))), type: 'money' as const },
+        { label: 'Fees Retained', value: fromPaise(sumPaise(completed.map((r) => r.feeAmount))), type: 'money' as const },
+        { label: 'Awaiting Payout (net)', value: fromPaise(sumPaise(open.map((r) => r.netAmount))), type: 'money' as const },
       ],
     };
   }

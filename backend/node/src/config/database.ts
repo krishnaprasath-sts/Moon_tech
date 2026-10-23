@@ -23,8 +23,9 @@ export async function ensureDatabaseExists(): Promise<void> {
     await connection.end();
     logger.info(`Database '${config.db.name}' verified/created in MySQL.`);
   } catch (err: any) {
-    logger.error(`Failed to auto-create database '${config.db.name}':`, err.message);
-    throw err;
+    // Shared hosting (cPanel / Webuzo) users usually cannot CREATE DATABASE; the database is
+    // created from the hosting panel instead, so this is a warning and not a fatal error.
+    logger.warn(`Could not auto-create database '${config.db.name}' (${err.message}). Continuing with the existing database.`);
   }
 }
 

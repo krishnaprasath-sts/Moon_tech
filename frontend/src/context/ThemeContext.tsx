@@ -14,7 +14,7 @@ const STORAGE_KEY = 'moontech-theme';
 const THEME_CHANGE_EVENT = 'moontech-theme-change';
 
 const ThemeContext = createContext<ThemeContextType>({
-  theme: 'dark',
+  theme: 'light',
   toggleTheme: () => {},
   setTheme: () => {},
 });
@@ -34,14 +34,14 @@ let fallbackTheme: Theme | null = null;
 function getStoredTheme(): Theme {
   if (fallbackTheme) return fallbackTheme;
   try {
-    // Default to dark mode for fintech elegance
-    return localStorage.getItem(STORAGE_KEY) === 'light' ? 'light' : 'dark';
+    // Light mode by default; dark only when the visitor chose it on this device
+    return localStorage.getItem(STORAGE_KEY) === 'dark' ? 'dark' : 'light';
   } catch {
-    return 'dark';
+    return 'light';
   }
 }
 
-const getServerTheme = (): Theme => 'dark';
+const getServerTheme = (): Theme => 'light';
 
 function applyTheme(t: Theme) {
   const root = document.documentElement;

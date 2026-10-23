@@ -107,8 +107,12 @@ export interface CustomerDetail {
     id: number;
     status: KycStatus;
     panMasked: string;
+    panNumber?: string | null;
     aadhaarMasked: string;
+    aadhaarNumber?: string | null;
     bankAccountMasked: string;
+    /** Full account number from KYC; only returned to SUPER_ADMIN / ADMIN */
+    bankAccountNumber?: string | null;
     accountHolderName?: string;
     ifscCode?: string;
     submittedAt?: string;
@@ -117,6 +121,13 @@ export interface CustomerDetail {
     hasPassbookDoc: boolean;
     hasPanDoc: boolean;
     hasAadhaarDoc: boolean;
+    hasAadhaarBackDoc?: boolean;
+    documents?: {
+      passbook: { available: boolean; viewUrl: string | null };
+      pan: { available: boolean; viewUrl: string | null };
+      aadhaar: { available: boolean; viewUrl: string | null };
+      aadhaarBack?: { available: boolean; viewUrl: string | null };
+    };
   } | null;
   referrals: {
     totalReferrals: number;
@@ -159,6 +170,7 @@ export interface KycSubmissionSummary {
   hasPassbookDoc: boolean;
   hasPanDoc: boolean;
   hasAadhaarDoc: boolean;
+  hasAadhaarBackDoc?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -185,20 +197,25 @@ export interface KycDetail {
   };
   bankDetails: {
     maskedAccountNumber: string;
+    /** Full account number; only returned to SUPER_ADMIN / ADMIN */
+    accountNumber?: string | null;
     last4?: string;
     accountHolderName?: string;
     ifscCode?: string;
   };
   identityDetails: {
     maskedPan: string;
+    panNumber?: string | null;
     panLast4?: string;
     maskedAadhaar: string;
+    aadhaarNumber?: string | null;
     aadhaarLast4?: string;
   };
   documents: {
     passbook: { available: boolean; viewUrl: string | null };
     pan: { available: boolean; viewUrl: string | null };
     aadhaar: { available: boolean; viewUrl: string | null };
+    aadhaarBack?: { available: boolean; viewUrl: string | null };
   };
   reviewInfo: {
     submittedAt?: string;
@@ -222,6 +239,10 @@ export interface ReferralRecord {
   referralCode: string;
   status: string;
   createdAt: string;
+  /** Commission the referrer earned from this referred customer's investments */
+  commissionEarned: number;
+  commissionPending: number;
+  commissionCount: number;
   referrer: {
     id: number;
     name: string;
@@ -337,11 +358,22 @@ export type WalletTxnType =
   | 'REFUND'
   | 'ADJUSTMENT';
 
+/**
+ * CAPITAL: deposits and returned principal; invested from here and the only money that earns.
+ * PROFIT: daily profit and referral commission; withdrawable any time without fee.
+ */
+export type WalletBucket = 'CAPITAL' | 'PROFIT';
+
+/** PER_MONTH: % per month paid as 20 working-day credits. PER_YEAR: % per year / 240. PER_DAY: legacy, % every working day. */
+export type RateBasis = 'PER_MONTH' | 'PER_YEAR' | 'PER_DAY';
+
 export interface WalletTransaction {
   id: number;
   reference: string;
   type: WalletTxnType;
   direction: WalletTxnDirection;
+  /** Which wallet moved; balanceBefore/After are that wallet's balances */
+  bucket: WalletBucket;
   amount: number;
   balanceBefore: number;
   balanceAfter: number;
@@ -359,11 +391,16 @@ export interface AdminWalletTransaction extends WalletTransaction {
   customerPhone?: string | null;
 }
 
+export type DepositMethod = 'UPI' | 'BANK_TRANSFER';
+
 export interface AdminDeposit {
   id: number;
   reference: string;
   userId: number;
   amount: number;
+  /** How the customer paid */
+  paymentMethod: DepositMethod;
+  /** UPI transaction ID (UTR) or bank transfer reference */
   upiTransactionId: string;
   hasReceipt: boolean;
   status: DepositStatus;
@@ -377,6 +414,28 @@ export interface AdminDeposit {
   customerPhone?: string | null;
   customerStatus?: UserStatus | null;
   walletBalance?: number;
+  /** Manual verification aids returned by the detail endpoint */
+  verification?: DepositVerification;
+}
+
+export interface DepositUtrMatch {
+  id: number;
+  reference: string;
+  status: DepositStatus;
+  amount: number;
+  customerName: string;
+  customerEmail: string;
+  sameCustomer: boolean;
+  createdAt: string;
+}
+
+export interface DepositVerification {
+  utrAlreadyCredited: boolean;
+  utrMatches: DepositUtrMatch[];
+  customerKycStatus: KycStatus | null;
+  kycAccountHolderName: string | null;
+  previousDeposits: { approved: number; rejected: number; pending: number };
+  isFirstDeposit: boolean;
 }
 
 export interface DepositApprovalResult extends AdminDeposit {
@@ -384,15 +443,28 @@ export interface DepositApprovalResult extends AdminDeposit {
   transactionReference: string;
 }
 
+/** AT_MATURITY: profit paid with the principal at the end. DAILY: profitValue% credited every working day (Mon-Fri, 6:00 AM IST). */
+export type ProfitPayoutMode = 'AT_MATURITY' | 'DAILY';
+
 export interface InvestmentPlan {
   id: number;
   name: string;
   description?: string | null;
   minAmount: number;
   maxAmount: number;
+  /** 0 = open-ended: runs until the customer withdraws the capital */
   durationDays: number;
+  isOpenEnded: boolean;
+  /** Days during which the capital cannot be withdrawn (0 = none) */
+  lockInDays: number;
   profitType: ProfitType;
   profitValue: number;
+  payoutMode: ProfitPayoutMode;
+  rateBasis: RateBasis;
+  /** Per-working-day % of the capital: 5% / month -> 0.25 */
+  dailyRatePercent: number;
+  creditsPerMonth: number;
+  creditsPerWeek: number;
   isActive: boolean;
   isFeatured: boolean;
   featuredTagline?: string | null;
@@ -410,8 +482,11 @@ export interface InvestmentPlanPayload {
   minAmount: number;
   maxAmount: number;
   durationDays: number;
+  lockInDays?: number;
   profitType: ProfitType;
   profitValue: number;
+  payoutMode?: ProfitPayoutMode;
+  rateBasis?: RateBasis;
   isActive?: boolean;
   isFeatured?: boolean;
   featuredTagline?: string | null;
@@ -421,8 +496,14 @@ export interface InvestmentPlanPayload {
 export interface InvestmentWithdrawalSummary {
   id: number;
   reference: string;
+  principalAmount?: number;
+  profitAmount?: number;
   totalAmount: number;
+  feePercent?: number;
+  feeAmount?: number;
+  netAmount?: number;
   status: WithdrawalStatus;
+  isEarly?: boolean;
   rejectionReason?: string | null;
   createdAt: string;
   completedAt?: string | null;
@@ -436,12 +517,41 @@ export interface Investment {
   planName: string;
   profitType: ProfitType;
   profitValue: number;
+  payoutMode: ProfitPayoutMode;
+  rateBasis: RateBasis;
+  dailyRatePercent: number;
   durationDays: number;
+  isOpenEnded: boolean;
+  lockInDays: number;
+  lockInEndsAt: string | null;
+  /** Capital cannot be withdrawn yet (lock-in running and no admin exception) */
+  isLocked: boolean;
   amount: number;
   expectedProfit: number;
+  /** DAILY plans: profit per working day / week / month, paying days in the term, and what has been credited so far */
+  dailyProfit: number;
+  weeklyProfit: number;
+  monthlyProfit: number;
+  profitDays: number;
+  profitCredited: number;
+  profitRemaining: number;
+  /** DAILY plans: working days already credited, and when the next 6:00 AM credit lands */
+  creditedDays: number;
+  /** Monthly plans: at most this many credits per 30-day cycle (null for legacy per-day plans) */
+  creditsPerCycle: number | null;
+  currentCycle: number;
+  creditsThisCycle: number;
+  nextCreditAt: string | null;
+  nextCreditDue: boolean;
+  /** Fee charged when the capital is withdrawn; the customer receives netCapitalOnWithdrawal */
+  feePercent: number;
+  /** True while the investment runs and has not matured: closing it now costs the fee */
+  earlyExitFeeApplies: boolean;
+  capitalWithdrawalFee: number;
+  netCapitalOnWithdrawal: number;
   maturityAmount: number;
   startDate: string;
-  maturityDate: string;
+  maturityDate: string | null;
   status: InvestmentStatus;
   earlyWithdrawalAllowed: boolean;
   canRequestWithdrawal: boolean;
@@ -454,23 +564,43 @@ export interface Investment {
   createdAt: string;
 }
 
+export interface ProfitCreditEntry {
+  id: number;
+  creditDay: string;
+  cycleNo: number;
+  amount: number;
+  creditedAt: string | null;
+  walletTransactionId: number | null;
+}
+
 export interface AdminInvestment extends Investment {
   customerName?: string | null;
   customerEmail?: string | null;
   customerPhone?: string | null;
   withdrawals?: InvestmentWithdrawalSummary[];
+  profitCredits?: ProfitCreditEntry[];
 }
+
+export type WithdrawalSource = 'INVESTMENT' | 'WALLET';
 
 export interface AdminWithdrawal {
   id: number;
   reference: string;
   userId: number;
-  investmentId: number;
-  investmentReference: string;
-  planName: string;
+  /** INVESTMENT: capital of a closed investment. WALLET: payout of a wallet balance (already debited). */
+  source: WithdrawalSource;
+  /** CAPITAL withdrawals carry the capital withdrawal fee; PROFIT withdrawals are free */
+  bucket: WalletBucket;
+  investmentId: number | null;
+  investmentReference: string | null;
+  planName: string | null;
   principalAmount: number;
   profitAmount: number;
+  /** Gross requested; netAmount = totalAmount - feeAmount is what the admin pays */
   totalAmount: number;
+  feePercent: number;
+  feeAmount: number;
+  netAmount: number;
   isEarly: boolean;
   payoutMethod: PayoutMethod;
   payoutUpiId?: string | null;
@@ -502,7 +632,7 @@ export interface AdminWithdrawalDetail extends AdminWithdrawal {
     maturityAmount: number;
     durationDays: number;
     startDate: string;
-    maturityDate: string;
+    maturityDate: string | null;
     status: InvestmentStatus;
   } | null;
 }
@@ -512,6 +642,8 @@ export interface PayoutDetails {
   upiId?: string | null;
   accountHolderName?: string | null;
   accountNumberMasked?: string | null;
+  /** Full account number; only returned to SUPER_ADMIN / ADMIN */
+  accountNumber?: string | null;
   ifscCode?: string | null;
   bankName?: string | null;
   hasBankDetails: boolean;
@@ -546,9 +678,21 @@ export interface FinanceDashboard {
   pendingWithdrawalRequests: number;
   pendingWithdrawalAmount: number;
   totalProfitPaid: number;
+  /** Net paid to customers, and capital withdrawal fees retained */
   totalWithdrawn: number;
+  totalWithdrawalFees: number;
   totalWalletBalance: number;
+  totalCapitalBalance: number;
+  totalProfitBalance: number;
   walletTransactions: number;
+  totalDailyProfitCredited: number;
+  dailyProfitCredits: number;
+  totalReferralCommissionPaid: number;
+  pendingReferralCommissionAmount: number;
+  pendingReferralCommissions: number;
+  lastPayoutRunAt: string | null;
+  payoutSchedule: string;
+  walletWithdrawalsPending: number;
   investmentStatusDistribution: Array<{ name: string; value: number; color: string }>;
   recentTransactions: AdminWalletTransaction[];
   upcomingMaturities: UpcomingMaturity[];
@@ -557,12 +701,18 @@ export interface FinanceDashboard {
 export interface CustomerFinance {
   customerId: number;
   walletBalance: number;
+  capitalBalance: number;
+  profitBalance: number;
   summary: {
     investedAmount: number;
     expectedProfit: number;
     totalDeposited: number;
     totalProfitPaid: number;
+    dailyProfitCredited: number;
+    referralCommissionEarned: number;
+    referralCommissionPending: number;
     totalWithdrawn: number;
+    totalWithdrawalFees: number;
     investmentsCount: number;
     recentCreditsCount: number;
   };
@@ -580,8 +730,12 @@ export interface CustomerFinance {
   withdrawals: Array<{
     id: number;
     reference: string;
+    source: WithdrawalSource;
+    bucket: WalletBucket;
     totalAmount: number;
     profitAmount: number;
+    feeAmount: number;
+    netAmount: number;
     status: WithdrawalStatus;
     createdAt: string;
     completedAt?: string | null;
@@ -593,12 +747,64 @@ export interface PlatformSettings {
   walletMaxTopup: number;
   upiId: string;
   upiPayeeName: string;
+  /** File name of the admin-uploaded UPI QR image; empty = QR generated from the UPI ID */
+  upiQrImage: string;
   depositInstructions: string;
+  /** Bank transfer destination; all four must be set (or all empty) */
+  bankAccountName: string;
+  bankAccountNumber: string;
+  bankIfsc: string;
+  bankName: string;
+  bankTransferInstructions: string;
   requireKycForInvestment: boolean;
+  requireKycForWithdrawal: boolean;
+  walletMinWithdrawal: number;
+  /** One-time referral commission, % of the referred customer's investment amount */
+  referralCommissionPercent: number;
+  /** Deducted from capital withdrawals (closing an investment or withdrawing the capital wallet); profit withdrawals are free */
+  capitalWithdrawalFeePercent: number;
+}
+
+export interface PayoutJobStatus {
+  schedule: string;
+  lastRunAt: string | null;
+}
+
+export interface PayoutRunResult {
+  payableDay: string;
+  profitCredits: number;
+  profitAmount: number;
+  commissions: number;
+  commissionAmount: number;
+}
+
+export type ReferralCommissionStatus = 'PENDING' | 'CREDITED' | 'CANCELLED';
+
+export interface AdminReferralCommission {
+  id: number;
+  referrerUserId: number;
+  referrerName: string;
+  referrerEmail: string;
+  referredUserId: number;
+  referredName: string;
+  referredEmail: string;
+  investmentId: number;
+  investmentReference: string | null;
+  planName: string | null;
+  investmentAmount: number;
+  commissionPercent: number;
+  amount: number;
+  status: ReferralCommissionStatus;
+  eligibleAt: string | null;
+  creditedAt: string | null;
+  cancelledAt: string | null;
+  createdAt: string | null;
 }
 
 export interface WalletAdjustmentPayload {
   direction: WalletTxnDirection;
+  /** Which wallet to adjust; defaults to PROFIT on the server */
+  bucket: WalletBucket;
   amount: number;
   reason: string;
 }

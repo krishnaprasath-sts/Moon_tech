@@ -1,6 +1,6 @@
 import { DataTypes, Model, Optional } from 'sequelize';
 import { sequelize } from '../config/database.js';
-import { InvestmentStatus, ProfitType } from '../types/index.js';
+import { InvestmentStatus, ProfitType, ProfitPayoutMode, RateBasis } from '../types/index.js';
 import { decimalGetter } from '../utils/money.js';
 
 export interface InvestmentAttributes {
@@ -11,12 +11,21 @@ export interface InvestmentAttributes {
   plan_name: string;
   profit_type: ProfitType;
   profit_value: number;
+  payout_mode: ProfitPayoutMode;
+  rate_basis: RateBasis;
+  /** Days from start during which the capital cannot be withdrawn (0 = none) */
+  lock_in_days: number;
+  /** Capital withdrawal fee (%) snapshotted from settings when the investment was made */
+  fee_percent: number;
+  /** 0 = open-ended (no maturity) */
   duration_days: number;
   amount: number;
   expected_profit: number;
+  profit_credited: number;
   maturity_amount: number;
   start_date: Date;
-  maturity_date: Date;
+  /** NULL for open-ended investments */
+  maturity_date: Date | null;
   status: InvestmentStatus;
   early_withdrawal_allowed: boolean;
   matured_at?: Date | null;
@@ -31,6 +40,12 @@ export interface InvestmentCreationAttributes
   extends Optional<
     InvestmentAttributes,
     | 'id'
+    | 'payout_mode'
+    | 'rate_basis'
+    | 'lock_in_days'
+    | 'fee_percent'
+    | 'maturity_date'
+    | 'profit_credited'
     | 'status'
     | 'early_withdrawal_allowed'
     | 'matured_at'
@@ -52,12 +67,17 @@ export class Investment
   declare public plan_name: string;
   declare public profit_type: ProfitType;
   declare public profit_value: number;
+  declare public payout_mode: ProfitPayoutMode;
+  declare public rate_basis: RateBasis;
+  declare public lock_in_days: number;
+  declare public fee_percent: number;
   declare public duration_days: number;
   declare public amount: number;
   declare public expected_profit: number;
+  declare public profit_credited: number;
   declare public maturity_amount: number;
   declare public start_date: Date;
-  declare public maturity_date: Date;
+  declare public maturity_date: Date | null;
   declare public status: InvestmentStatus;
   declare public early_withdrawal_allowed: boolean;
   declare public matured_at: Date | null;
@@ -110,6 +130,27 @@ Investment.init(
       allowNull: false,
       get: decimalGetter('profit_value'),
     },
+    payout_mode: {
+      type: DataTypes.ENUM(...Object.values(ProfitPayoutMode)),
+      allowNull: false,
+      defaultValue: ProfitPayoutMode.AT_MATURITY,
+    },
+    rate_basis: {
+      type: DataTypes.ENUM(...Object.values(RateBasis)),
+      allowNull: false,
+      defaultValue: RateBasis.PER_MONTH,
+    },
+    lock_in_days: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    fee_percent: {
+      type: DataTypes.DECIMAL(5, 2),
+      allowNull: false,
+      defaultValue: 0,
+      get: decimalGetter('fee_percent'),
+    },
     duration_days: {
       type: DataTypes.INTEGER,
       allowNull: false,
@@ -124,6 +165,13 @@ Investment.init(
       allowNull: false,
       get: decimalGetter('expected_profit'),
     },
+    // Running total of daily profit already credited to the wallet (DAILY payout mode)
+    profit_credited: {
+      type: DataTypes.DECIMAL(18, 2),
+      allowNull: false,
+      defaultValue: 0,
+      get: decimalGetter('profit_credited'),
+    },
     maturity_amount: {
       type: DataTypes.DECIMAL(18, 2),
       allowNull: false,
@@ -135,7 +183,7 @@ Investment.init(
     },
     maturity_date: {
       type: DataTypes.DATE,
-      allowNull: false,
+      allowNull: true,
     },
     status: {
       type: DataTypes.ENUM(...Object.values(InvestmentStatus)),

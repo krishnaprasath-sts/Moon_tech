@@ -100,7 +100,7 @@ export class KycController {
         throw new BadRequestError('Invalid KYC ID');
       }
 
-      const result = await KycService.getKycById(kycId);
+      const result = await KycService.getKycById(kycId, req.user);
 
       sendResponse({
         res,
@@ -200,14 +200,14 @@ export class KycController {
   public static async getDocument(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const kycId = parseInt(req.params.id, 10);
-      const documentType = req.params.type as 'passbook' | 'pan' | 'aadhaar';
+      const documentType = req.params.type as 'passbook' | 'pan' | 'aadhaar' | 'aadhaar-back';
       const requestingUser = req.user!;
 
       if (isNaN(kycId)) {
         throw new BadRequestError('Invalid KYC ID');
       }
 
-      if (!['passbook', 'pan', 'aadhaar'].includes(documentType)) {
+      if (!['passbook', 'pan', 'aadhaar', 'aadhaar-back'].includes(documentType)) {
         throw new BadRequestError('Invalid document type requested');
       }
 

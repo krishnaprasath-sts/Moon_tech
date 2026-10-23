@@ -20,7 +20,17 @@ import { btnPrimaryClass, tableCardClass, theadClass, tbodyClass, trClass, numCe
 import { formatINR, formatNumber, getApiErrorMessage } from '../utils/finance';
 
 const formatProfit = (plan: InvestmentPlan) =>
-  plan.profitType === 'PERCENTAGE' ? `${plan.profitValue}%` : `${formatINR(plan.profitValue)} fixed`;
+  plan.payoutMode === 'DAILY'
+    ? plan.rateBasis === 'PER_MONTH'
+      ? `${plan.profitValue}% / month = ${plan.dailyRatePercent}% / day`
+      : plan.rateBasis === 'PER_YEAR'
+      ? `${plan.profitValue}% / year = ${plan.dailyRatePercent}% / day`
+      : `${plan.profitValue}% daily (legacy)`
+    : plan.profitType === 'PERCENTAGE'
+    ? `${plan.profitValue}% at maturity`
+    : `${formatINR(plan.profitValue)} fixed at maturity`;
+
+const formatPeriod = (plan: InvestmentPlan) => (Number(plan.durationDays) === 0 ? 'Open-ended' : `${formatNumber(plan.durationDays)} days`);
 
 export const InvestmentPlansPage: React.FC = () => {
   const [selectedPlanForEdit, setSelectedPlanForEdit] = useState<InvestmentPlan | null>(null);
@@ -205,7 +215,10 @@ export const InvestmentPlansPage: React.FC = () => {
                         <div className="text-[11px] text-slate-500 dark:text-slate-400">to {formatINR(plan.maxAmount)}</div>
                       </td>
                       <td className={`py-3.5 px-4 font-semibold text-slate-700 dark:text-slate-300 ${numCellClass}`}>
-                        {formatNumber(plan.durationDays)} days
+                        {formatPeriod(plan)}
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-sans">
+                          {Number(plan.lockInDays) > 0 ? `${formatNumber(plan.lockInDays)}d lock-in` : 'No lock-in'}
+                        </div>
                       </td>
                       <td className="py-3.5 px-4">
                         <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 whitespace-nowrap font-mono">

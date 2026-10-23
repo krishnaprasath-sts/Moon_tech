@@ -20,6 +20,7 @@ import { AccountStatusBadge } from '../components/AccountStatusBadge';
 import { RoleBadge } from '../components/RoleBadge';
 import { ActionModal } from '../components/ActionModal';
 import { FileViewerModal } from '../components/FileViewerModal';
+import { CopyButton } from '../components/CopyButton';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { KycStatus } from '../types';
@@ -33,6 +34,7 @@ import {
   btnRowClass,
   cardClass,
   inputClass,
+  labelClass,
 } from '../components/ui';
 import { formatDate, formatDateTime, getApiErrorMessage, getErrorStatus } from '../utils/finance';
 
@@ -41,7 +43,8 @@ type ActiveAction = 'verify' | 'reject' | 'resubmit' | null;
 const DOCUMENTS: Array<{ key: KycDocumentType; label: string }> = [
   { key: 'passbook', label: 'Bank passbook / statement' },
   { key: 'pan', label: 'PAN card' },
-  { key: 'aadhaar', label: 'Aadhaar card' },
+  { key: 'aadhaar', label: 'Aadhaar card (front)' },
+  { key: 'aadhaar-back', label: 'Aadhaar card (back)' },
 ];
 
 const REJECT_PRESETS = [
@@ -85,6 +88,8 @@ export const KycReviewPage: React.FC = () => {
   const [activeAction, setActiveAction] = useState<ActiveAction>(null);
   const [rejectRemarks, setRejectRemarks] = useState('');
   const [activeDocument, setActiveDocument] = useState<KycDocumentType | null>(null);
+  // Verification checklist ticked inside the "Verify KYC" dialog
+  const [checklist, setChecklist] = useState<Record<string, boolean>>({});
 
   if (isLoading) {
     return (
@@ -130,8 +135,45 @@ export const KycReviewPage: React.FC = () => {
 
   const openAction = (action: ActiveAction) => {
     setRejectRemarks('');
+    setChecklist({});
     setActiveAction(action);
   };
+
+  // Automatic consistency signals shown inside the verification checklist
+  const holderName = (kyc.bankDetails.accountHolderName || '').trim().toLowerCase();
+  const customerName = (kyc.customer.name || '').trim().toLowerCase();
+  const nameMatches = Boolean(holderName && customerName && (holderName === customerName || holderName.includes(customerName) || customerName.includes(holderName)));
+  const ifscValid = /^[A-Z]{4}0[A-Z0-9]{6}$/.test((kyc.bankDetails.ifscCode || '').toUpperCase());
+  const allDocs =
+    kyc.documents.passbook.available &&
+    kyc.documents.pan.available &&
+    kyc.documents.aadhaar.available &&
+    Boolean(kyc.documents.aadhaarBack?.available);
+  const checklistItems: { key: string; label: string; hint: string; warn?: boolean }[] = [
+    {
+      key: 'docs',
+      label: 'All three documents are present and readable',
+      hint: allDocs ? 'PAN, Aadhaar front and back, and passbook uploaded' : 'One or more documents are missing - consider requesting a resubmission',
+      warn: !allDocs,
+    },
+    {
+      key: 'pan',
+      label: 'Name and PAN on the PAN card match the customer profile',
+      hint: `Profile name: ${kyc.customer.name} · PAN ending ${kyc.identityDetails.panLast4 || '----'}`,
+    },
+    {
+      key: 'aadhaar',
+      label: 'Aadhaar name and photo match the PAN card',
+      hint: `Aadhaar ending ${kyc.identityDetails.aadhaarLast4 || '----'}`,
+    },
+    {
+      key: 'bank',
+      label: 'Passbook shows the same account holder, account number and IFSC',
+      hint: `Holder: ${kyc.bankDetails.accountHolderName || '-'} (${nameMatches ? 'matches profile name' : 'does not match profile name - check carefully'}) · IFSC ${kyc.bankDetails.ifscCode || '-'} (${ifscValid ? 'valid format' : 'unusual format'})`,
+      warn: !nameMatches || !ifscValid,
+    },
+  ];
+  const allChecked = checklistItems.every((item) => checklist[item.key]);
 
   const handleVerify = async (remarks: string) => {
     try {
@@ -214,11 +256,11 @@ export const KycReviewPage: React.FC = () => {
                   type="button"
                   onClick={() => openAction('verify')}
                   disabled={isVerified}
-                  title={isVerified ? 'Already verified' : undefined}
+                  title={isVerified ? 'Already verified and approved' : undefined}
                   className={`${btnSuccessClass} px-4 py-2.5`}
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  Verify KYC
+                  {isVerified ? 'Verified & Approved' : 'Verify KYC'}
                 </button>
                 <button
                   type="button"
@@ -228,7 +270,7 @@ export const KycReviewPage: React.FC = () => {
                   className={`${btnDangerClass} px-4 py-2.5`}
                 >
                   <XCircle className="w-4 h-4" />
-                  Reject
+                  {isVerified ? 'Revoke Verification' : 'Reject'}
                 </button>
                 <button
                   type="button"
@@ -308,22 +350,88 @@ export const KycReviewPage: React.FC = () => {
             <CreditCard className="w-4 h-4 text-brand-600 dark:text-brand-400" />
             Identity & Bank
           </h2>
-          <div className="space-y-3 text-xs pt-2">
-            <DetailRow label="PAN" mono>
-              <span className="text-brand-600 dark:text-brand-300 font-bold tracking-wider">{kyc.identityDetails.maskedPan || '—'}</span>
-            </DetailRow>
-            <DetailRow label="Aadhaar" mono>
-              <span className="font-bold tracking-wider">{kyc.identityDetails.maskedAadhaar || '—'}</span>
-            </DetailRow>
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-              <DetailRow label="Bank Account" mono>
-                <span className="font-bold tracking-wider">{kyc.bankDetails.maskedAccountNumber || '—'}</span>
-              </DetailRow>
+          <div className="space-y-3.5 text-xs pt-2">
+            <div>
+              <span className="text-slate-500 block text-[11px] uppercase font-semibold">PAN</span>
+              <div className="flex items-center justify-between gap-2 mt-0.5">
+                <span className="text-brand-600 dark:text-brand-300 font-bold tracking-wider font-mono text-sm select-all">
+                  {kyc.identityDetails.panNumber || kyc.identityDetails.maskedPan || '—'}
+                </span>
+                {(kyc.identityDetails.panNumber || kyc.identityDetails.maskedPan) && (
+                  <CopyButton value={kyc.identityDetails.panNumber || kyc.identityDetails.maskedPan} label="PAN" />
+                )}
+              </div>
+              {kyc.identityDetails.panNumber ? (
+                <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">
+                  Full decrypted PAN visible to managers
+                </span>
+              ) : (
+                <span className="block text-[10px] text-slate-400 mt-0.5">Masked for view-only staff</span>
+              )}
             </div>
-            <DetailRow label="Account Holder">{kyc.bankDetails.accountHolderName || '—'}</DetailRow>
-            <DetailRow label="IFSC" mono>
-              {kyc.bankDetails.ifscCode || '—'}
-            </DetailRow>
+
+            <div>
+              <span className="text-slate-500 block text-[11px] uppercase font-semibold">Aadhaar</span>
+              <div className="flex items-center justify-between gap-2 mt-0.5">
+                <span className="font-bold tracking-wider font-mono text-sm select-all text-slate-900 dark:text-white">
+                  {kyc.identityDetails.aadhaarNumber || kyc.identityDetails.maskedAadhaar || '—'}
+                </span>
+                {(kyc.identityDetails.aadhaarNumber || kyc.identityDetails.maskedAadhaar) && (
+                  <CopyButton value={kyc.identityDetails.aadhaarNumber || kyc.identityDetails.maskedAadhaar} label="Aadhaar" />
+                )}
+              </div>
+              {kyc.identityDetails.aadhaarNumber ? (
+                <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">
+                  Full Aadhaar reference visible to managers
+                </span>
+              ) : (
+                <span className="block text-[10px] text-slate-400 mt-0.5">Masked for view-only staff</span>
+              )}
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-slate-500 block text-[11px] uppercase font-semibold">Bank Account</span>
+              <div className="flex items-center justify-between gap-2 mt-0.5">
+                <span className="font-bold tracking-wider font-mono text-sm select-all text-slate-900 dark:text-white">
+                  {kyc.bankDetails.accountNumber || kyc.bankDetails.maskedAccountNumber || '—'}
+                </span>
+                {(kyc.bankDetails.accountNumber || kyc.bankDetails.maskedAccountNumber) && (
+                  <CopyButton value={kyc.bankDetails.accountNumber || kyc.bankDetails.maskedAccountNumber} label="Bank Account Number" />
+                )}
+              </div>
+              {kyc.bankDetails.accountNumber ? (
+                <span className="block text-[10px] font-sans font-normal text-emerald-600 dark:text-emerald-400 mt-0.5">
+                  Full account number visible to managers for payout verification
+                </span>
+              ) : (
+                <span className="block text-[10px] font-sans font-normal text-slate-400 mt-0.5">Masked for view-only staff</span>
+              )}
+            </div>
+
+            <div>
+              <span className="text-slate-500 block text-[11px] uppercase font-semibold">Account Holder</span>
+              <div className="flex items-center justify-between gap-2 mt-0.5">
+                <span className="text-slate-800 dark:text-slate-200 font-medium break-words">
+                  {kyc.bankDetails.accountHolderName || '—'}
+                </span>
+                {kyc.bankDetails.accountHolderName && (
+                  <CopyButton value={kyc.bankDetails.accountHolderName} label="Account Holder" />
+                )}
+              </div>
+            </div>
+
+            <div>
+              <span className="text-slate-500 block text-[11px] uppercase font-semibold">IFSC</span>
+              <div className="flex items-center justify-between gap-2 mt-0.5">
+                <span className="font-mono font-bold text-slate-900 dark:text-white">
+                  {kyc.bankDetails.ifscCode || '—'}
+                </span>
+                {kyc.bankDetails.ifscCode && (
+                  <CopyButton value={kyc.bankDetails.ifscCode} label="IFSC Code" />
+                )}
+              </div>
+            </div>
+
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
               <DetailRow label="Submitted">{formatDateTime(kyc.reviewInfo?.submittedAt)}</DetailRow>
             </div>
@@ -338,7 +446,8 @@ export const KycReviewPage: React.FC = () => {
           </h2>
           <div className="space-y-3 pt-2">
             {DOCUMENTS.map((doc) => {
-              const available = kyc.documents?.[doc.key]?.available;
+              const available =
+                doc.key === 'aadhaar-back' ? kyc.documents?.aadhaarBack?.available : kyc.documents?.[doc.key]?.available;
               return (
                 <div
                   key={doc.key}
@@ -424,7 +533,36 @@ export const KycReviewPage: React.FC = () => {
         placeholder="e.g. All documents verified and match the submitted details."
         confirmText="Verify KYC"
         isLoading={verifyMutation.isPending}
-      />
+        validate={() => (allChecked ? null : 'Tick every item in the verification checklist before approving.')}
+      >
+        <fieldset className="space-y-2">
+          <legend className={labelClass}>Verification checklist</legend>
+          {checklistItems.map((item) => (
+            <label
+              key={item.key}
+              className={`flex items-start gap-2.5 rounded-lg border p-2.5 cursor-pointer transition ${
+                checklist[item.key]
+                  ? 'border-emerald-300 dark:border-emerald-500/40 bg-emerald-50/60 dark:bg-emerald-500/10'
+                  : item.warn
+                  ? 'border-amber-300 dark:border-amber-500/40 bg-amber-50/60 dark:bg-amber-500/10'
+                  : 'border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(checklist[item.key])}
+                onChange={(e) => setChecklist((prev) => ({ ...prev, [item.key]: e.target.checked }))}
+                disabled={verifyMutation.isPending}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span className="min-w-0">
+                <span className="block text-xs font-medium text-slate-800 dark:text-slate-100">{item.label}</span>
+                <span className={`block text-[11px] mt-0.5 ${item.warn ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500'}`}>{item.hint}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      </ActionModal>
 
       {/* Reject */}
       <ActionModal

@@ -5,7 +5,7 @@ import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 
 export const metadata: Metadata = {
-  title: 'Page not found | MoonTech Invest',
+  title: 'Page not found | MoonTech Solutions',
 };
 
 export default function NotFound() {

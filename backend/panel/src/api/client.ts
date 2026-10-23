@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 export const TOKEN_STORAGE_KEY = 'moon_tech_token';
 export const USER_STORAGE_KEY = 'moon_tech_user';

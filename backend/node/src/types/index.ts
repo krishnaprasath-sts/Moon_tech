@@ -81,6 +81,11 @@ export interface DashboardStats {
   registrationTrend: { date: string; count: number }[];
 }
 
+export enum DepositMethod {
+  UPI = 'UPI',
+  BANK_TRANSFER = 'BANK_TRANSFER',
+}
+
 export enum DepositStatus {
   PENDING = 'PENDING',
   APPROVED = 'APPROVED',
@@ -92,6 +97,7 @@ export enum WalletTxnType {
   INVESTMENT = 'INVESTMENT',
   MATURITY_PRINCIPAL = 'MATURITY_PRINCIPAL',
   PROFIT = 'PROFIT',
+  REFERRAL_COMMISSION = 'REFERRAL_COMMISSION',
   WITHDRAWAL = 'WITHDRAWAL',
   REFUND = 'REFUND',
   ADJUSTMENT = 'ADJUSTMENT',
@@ -102,9 +108,57 @@ export enum WalletTxnDirection {
   DEBIT = 'DEBIT',
 }
 
+/**
+ * The wallet is split in two.
+ * CAPITAL: deposited money and principal returned at maturity. It is what gets invested
+ *          and the only money that earns profit. Withdrawn in full only, less the capital
+ *          withdrawal fee.
+ * PROFIT:  daily profit and referral commission. Withdrawable any time without fee, and it
+ *          never earns profit itself (no compounding) unless the customer re-invests it.
+ */
+export enum WalletBucket {
+  CAPITAL = 'CAPITAL',
+  PROFIT = 'PROFIT',
+}
+
+/**
+ * What `profit_value` of a DAILY plan means.
+ * PER_MONTH: % of the capital per month, paid as 20 equal working-day credits (4 weeks x 5 days).
+ * PER_YEAR:  % of the capital per year, paid as 240 equal working-day credits.
+ * PER_DAY:   legacy; % of the capital on every working day, no monthly cap.
+ */
+export enum RateBasis {
+  PER_MONTH = 'PER_MONTH',
+  PER_YEAR = 'PER_YEAR',
+  PER_DAY = 'PER_DAY',
+}
+
 export enum ProfitType {
   PERCENTAGE = 'PERCENTAGE',
   FIXED = 'FIXED',
+}
+
+/**
+ * When the profit of a plan reaches the customer's wallet.
+ * AT_MATURITY: the whole profit is paid with the principal at the end of the term.
+ * DAILY: profit_value is a daily percentage of the principal, credited to the wallet
+ *        every working day (Monday-Friday, IST) at the payout hour; principal is returned at maturity.
+ */
+export enum ProfitPayoutMode {
+  AT_MATURITY = 'AT_MATURITY',
+  DAILY = 'DAILY',
+}
+
+/** Where the money of a withdrawal request comes from */
+export enum WithdrawalSource {
+  INVESTMENT = 'INVESTMENT',
+  WALLET = 'WALLET',
+}
+
+export enum ReferralCommissionStatus {
+  PENDING = 'PENDING',
+  CREDITED = 'CREDITED',
+  CANCELLED = 'CANCELLED',
 }
 
 export enum InvestmentStatus {
@@ -139,6 +193,11 @@ export enum NotificationType {
   WITHDRAWAL_REJECTED = 'WITHDRAWAL_REJECTED',
   WITHDRAWAL_COMPLETED = 'WITHDRAWAL_COMPLETED',
   WALLET_ADJUSTMENT = 'WALLET_ADJUSTMENT',
+  PROFIT_CREDITED = 'PROFIT_CREDITED',
+  REFERRAL_COMMISSION = 'REFERRAL_COMMISSION',
+  KYC_VERIFIED = 'KYC_VERIFIED',
+  KYC_REJECTED = 'KYC_REJECTED',
+  KYC_RESUBMISSION_REQUIRED = 'KYC_RESUBMISSION_REQUIRED',
   ANNOUNCEMENT = 'ANNOUNCEMENT',
 }
 

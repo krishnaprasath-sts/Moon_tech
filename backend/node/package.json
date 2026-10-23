@@ -9,7 +9,9 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "seed": "tsx src/database/seeders/seed.ts",
-    "migrate": "tsx src/database/migrations/runMigrations.ts"
+    "migrate": "tsx src/database/migrations/runMigrations.ts",
+    "test": "tsx scripts/unit-tests.ts",
+    "test:smoke": "tsx scripts/smoke-tests.ts"
   },
   "keywords": [
     "moon-tech",

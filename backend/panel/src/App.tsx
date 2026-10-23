@@ -43,6 +43,14 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   return <>{children}</>;
 };
 
+// Manager-only area (SUPER_ADMIN / ADMIN). Editors are view-only staff and are sent back to the dashboard.
+const ManagerRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAdmin, isLoading } = useAuth();
+  if (isLoading) return <FullScreenLoader />;
+  if (!isAdmin) return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+};
+
 // Keeps signed-in staff away from the login screen
 const PublicOnlyRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
@@ -96,7 +104,14 @@ export const App: React.FC = () => {
           <Route path="kyc/:id" element={<KycReviewPage />} />
           <Route path="referrals" element={<ReferralsPage />} />
           <Route path="activity-logs" element={<ActivityLogsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route
+            path="settings"
+            element={
+              <ManagerRoute>
+                <SettingsPage />
+              </ManagerRoute>
+            }
+          />
           {/* Unknown paths render a 404 inside the admin layout */}
           <Route path="*" element={<NotFoundPage />} />
         </Route>

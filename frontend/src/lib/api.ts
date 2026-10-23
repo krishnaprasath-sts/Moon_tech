@@ -1,4 +1,19 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+/**
+ * Base URL of the Node API.
+ * - NEXT_PUBLIC_API_URL wins when set (production / custom setups).
+ * - Otherwise, in the browser, talk to port 5000 on whatever host served the page, so the
+ *   app works when opened from another device on the LAN (http://192.168.x.x:3000).
+ * - On the server (SSR) fall back to localhost.
+ */
+function resolveApiBase(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:5000/api`;
+  }
+  return 'http://localhost:5000/api';
+}
+
+export const API_BASE = resolveApiBase();
 
 
 export interface AuthUser {
@@ -12,14 +27,34 @@ export interface AuthUser {
   kycStatus?: string;
 }
 
+export interface LoginSession {
+  user: AuthUser;
+  accessToken: string;
+  refreshToken?: string;
+}
+
+/** Customer logins are confirmed with a code emailed after a correct password */
+export interface LoginOtpChallenge {
+  otpRequired: true;
+  /** Opaque id of this challenge; sent back with the code */
+  challengeId: string;
+  /** Masked address the code was sent to, e.g. ra***@gmail.com */
+  email: string;
+  expiresAt: string;
+  expiresInSeconds: number;
+  resendAfterSeconds: number;
+  /** Only in local development without a mailbox */
+  devOtp?: string;
+}
+
+export function isOtpChallenge(data: LoginSession | LoginOtpChallenge | undefined): data is LoginOtpChallenge {
+  return Boolean(data && (data as LoginOtpChallenge).otpRequired === true);
+}
+
 export interface LoginResponse {
   success: boolean;
   message?: string;
-  data?: {
-    user: AuthUser;
-    accessToken: string;
-    refreshToken?: string;
-  };
+  data?: LoginSession | LoginOtpChallenge;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +116,52 @@ export interface Profile {
   createdAt: string;
 }
 
+export type ReferralCommissionStatus = 'PENDING' | 'CREDITED' | 'CANCELLED';
+
+export interface ReferredCustomer {
+  id: number;
+  referredUserId: number;
+  fullName: string;
+  email: string;
+  phone: string;
+  kycStatus: string;
+  accountStatus: string;
+  joinedAt: string;
+  status: string;
+  commissionEarned: number;
+}
+
+export interface ReferralCommission {
+  id: number;
+  referredUserId: number;
+  referredName: string;
+  investmentId: number;
+  investmentReference: string | null;
+  planName: string | null;
+  investmentAmount: number;
+  commissionPercent: number;
+  amount: number;
+  status: ReferralCommissionStatus;
+  eligibleAt: string | null;
+  creditedAt: string | null;
+  cancelledAt: string | null;
+  createdAt: string | null;
+}
+
+export interface ReferralSummary {
+  referralCode: string;
+  referredBy: string | null;
+  commissionPercent: number;
+  totalReferrals: number;
+  verifiedReferrals: number;
+  pendingKycReferrals: number;
+  totalCommissionEarned: number;
+  pendingCommission: number;
+  pendingCommissionCount: number;
+  referrals: ReferredCustomer[];
+  commissions: ReferralCommission[];
+}
+
 export interface UpdateProfileInput {
   fullName?: string;
   dateOfBirth?: string | null;
@@ -105,22 +186,65 @@ export interface WalletConfig {
   maxTopup: number;
   upiId: string;
   upiPayeeName: string;
+  /** API path of an admin-uploaded QR image (append to API_BASE); null = generate the QR from the UPI ID */
+  upiQrImageUrl: string | null;
   depositInstructions: string;
+  /** Bank transfer destination; offered only when the admin has configured all fields */
+  bankTransferEnabled: boolean;
+  bankAccountName: string;
+  bankAccountNumber: string;
+  bankIfsc: string;
+  bankName: string;
+  bankTransferInstructions: string;
   requireKycForInvestment: boolean;
+  requireKycForWithdrawal: boolean;
+  /** Smallest profit-wallet withdrawal a customer may request */
+  minWithdrawal: number;
+  referralCommissionPercent: number;
+  /** Deducted only when an investment is closed before it ends; matured capital, the capital wallet and profit are paid in full */
+  capitalWithdrawalFeePercent: number;
+  /** Human readable payout schedule for daily-profit plans and referral commission */
+  payoutSchedule: string;
 }
 
+/**
+ * CAPITAL: deposits and returned principal; invested from here and the only money that earns.
+ * PROFIT: daily profit and referral commission; withdrawable any time, never earns by itself.
+ */
+export type WalletBucket = 'CAPITAL' | 'PROFIT';
+
 export interface WalletSummary {
+  /** capitalBalance + profitBalance */
   balance: number;
+  /** Deposited money not yet invested + capital returned at maturity */
+  capitalBalance: number;
+  /** Daily profit and referral commission, withdrawable any time */
+  profitBalance: number;
+  /** Capital locked in running investments and earning daily profit */
+  investedCapital: number;
   pendingDepositAmount: number;
   pendingDepositCount: number;
   totalDeposited: number;
   investedAmount: number;
   expectedProfit: number;
   totalProfitEarned: number;
+  /** Daily profit credited so far by the 6:00 AM payout job */
+  dailyProfitCredited: number;
+  profitCreditedToday: number;
+  profitCreditedThisMonth: number;
+  lastProfitCreditDay: string | null;
+  referralEarnings: number;
+  referralEarningsPending: number;
+  /** Net amount paid out to the customer so far */
   totalWithdrawn: number;
+  totalFeesPaid: number;
   activeInvestments: number;
   maturedInvestments: number;
   pendingWithdrawals: number;
+  /** Wallet money reserved by withdrawal requests still being processed */
+  pendingWithdrawalAmount: number;
+  pendingCapitalWithdrawalAmount: number;
+  pendingProfitWithdrawalAmount: number;
   config: WalletConfig;
 }
 
@@ -129,6 +253,7 @@ export type TransactionType =
   | 'INVESTMENT'
   | 'MATURITY_PRINCIPAL'
   | 'PROFIT'
+  | 'REFERRAL_COMMISSION'
   | 'WITHDRAWAL'
   | 'REFUND'
   | 'ADJUSTMENT';
@@ -140,6 +265,8 @@ export interface WalletTransaction {
   reference: string;
   type: TransactionType;
   direction: TransactionDirection;
+  /** Which wallet moved; balanceBefore/After are that wallet's balances */
+  bucket: WalletBucket;
   amount: number;
   balanceBefore: number;
   balanceAfter: number;
@@ -153,15 +280,21 @@ export interface WalletTransaction {
 export interface TransactionListParams extends ListParams {
   type?: TransactionType | '';
   direction?: TransactionDirection | '';
+  bucket?: WalletBucket | '';
 }
 
 export type DepositStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export type DepositMethod = 'UPI' | 'BANK_TRANSFER';
 
 export interface Deposit {
   id: number;
   reference: string;
   userId: number;
   amount: number;
+  /** How the customer paid */
+  paymentMethod: DepositMethod;
+  /** UPI transaction ID (UTR) or bank transfer reference number */
   upiTransactionId: string;
   hasReceipt: boolean;
   status: DepositStatus;
@@ -177,11 +310,19 @@ export interface DepositListParams extends ListParams {
 
 export interface CreateDepositInput {
   amount: number;
+  paymentMethod: DepositMethod;
   upiTransactionId: string;
   receipt: File;
 }
 
 export type ProfitType = 'PERCENTAGE' | 'FIXED';
+
+/**
+ * What profitValue of a DAILY plan means.
+ * PER_MONTH: % of the capital per month, paid as 20 working-day credits (4 weeks x 5 days).
+ * PER_YEAR: % per year, paid as 240 working-day credits. PER_DAY: legacy, % every working day.
+ */
+export type RateBasis = 'PER_MONTH' | 'PER_YEAR' | 'PER_DAY';
 
 export interface InvestmentPlan {
   id: number;
@@ -189,9 +330,20 @@ export interface InvestmentPlan {
   description: string | null;
   minAmount: number;
   maxAmount: number;
+  /** 0 = open-ended: runs until the customer withdraws the capital */
   durationDays: number;
+  isOpenEnded: boolean;
+  /** Legacy: days during which the capital could not be withdrawn (always 0 for new plans) */
+  lockInDays: number;
   profitType: ProfitType;
   profitValue: number;
+  /** AT_MATURITY: profit paid with the principal at the end. DAILY: profit credited every working day. */
+  payoutMode: ProfitPayoutMode;
+  rateBasis: RateBasis;
+  /** Per-working-day % of the capital: 5% / month -> 0.25 */
+  dailyRatePercent: number;
+  creditsPerMonth: number;
+  creditsPerWeek: number;
   isActive: boolean;
   isFeatured: boolean;
   featuredTagline: string | null;
@@ -200,17 +352,38 @@ export interface InvestmentPlan {
   updatedAt: string;
 }
 
+export type ProfitPayoutMode = 'AT_MATURITY' | 'DAILY';
+
 export interface InvestmentPreview {
   planId: number;
   planName: string;
   amount: number;
+  source: WalletBucket;
   durationDays: number;
+  isOpenEnded: boolean;
+  lockInDays: number;
+  lockInEndsAt: string | null;
   profitType: ProfitType;
   profitValue: number;
+  payoutMode: ProfitPayoutMode;
+  rateBasis: RateBasis;
+  dailyRatePercent: number;
+  /** DAILY plans: profit credited per working day / week / month and the number of paying days in the term */
+  dailyProfit: number;
+  weeklyProfit: number;
+  monthlyProfit: number;
+  creditsPerCycle: number | null;
+  profitDays: number;
+  payoutHourIst: number;
   expectedProfit: number;
   maturityAmount: number;
+  /** Early withdrawal fee that would apply if the plan were closed before it ends */
+  feePercent: number;
+  earlyExitFeeApplies: boolean;
+  capitalWithdrawalFee: number;
+  netCapitalOnWithdrawal: number;
   startDate: string;
-  maturityDate: string;
+  maturityDate: string | null;
 }
 
 export type InvestmentStatus =
@@ -228,12 +401,42 @@ export interface Investment {
   planName: string;
   profitType: ProfitType;
   profitValue: number;
+  payoutMode: ProfitPayoutMode;
+  rateBasis: RateBasis;
+  dailyRatePercent: number;
   durationDays: number;
+  isOpenEnded: boolean;
+  lockInDays: number;
+  lockInEndsAt: string | null;
+  /** Capital cannot be withdrawn yet (lock-in running and no admin exception) */
+  isLocked: boolean;
   amount: number;
   expectedProfit: number;
+  dailyProfit: number;
+  weeklyProfit: number;
+  monthlyProfit: number;
+  profitDays: number;
+  profitCredited: number;
+  profitRemaining: number;
+  /** DAILY plans: number of working days already credited */
+  creditedDays: number;
+  /** Monthly plans: at most this many credits per 30-day cycle (null for legacy per-day plans) */
+  creditsPerCycle: number | null;
+  currentCycle: number;
+  creditsThisCycle: number;
+  /** DAILY plans: ISO instant of the next 6:00 AM IST credit, null once all days are paid */
+  nextCreditAt: string | null;
+  /** DAILY plans: the next credit day has passed 6:00 AM and is about to be processed */
+  nextCreditDue: boolean;
+  /** Fee percent snapshotted at invest time; charged only while earlyExitFeeApplies (closing before maturity) */
+  feePercent: number;
+  /** True while the investment is running and has not matured: closing it now costs the fee */
+  earlyExitFeeApplies: boolean;
+  capitalWithdrawalFee: number;
+  netCapitalOnWithdrawal: number;
   maturityAmount: number;
   startDate: string;
-  maturityDate: string;
+  maturityDate: string | null;
   status: InvestmentStatus;
   earlyWithdrawalAllowed: boolean;
   canRequestWithdrawal: boolean;
@@ -251,15 +454,31 @@ export type WithdrawalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED'
 export interface InvestmentWithdrawalSummary {
   id: number;
   reference: string;
+  principalAmount: number;
+  profitAmount: number;
   totalAmount: number;
+  feePercent: number;
+  feeAmount: number;
+  netAmount: number;
   status: WithdrawalStatus;
+  isEarly: boolean;
   rejectionReason: string | null;
   createdAt: string;
   completedAt: string | null;
 }
 
+export interface ProfitCreditEntry {
+  id: number;
+  creditDay: string;
+  cycleNo: number;
+  amount: number;
+  creditedAt: string | null;
+  walletTransactionId: number | null;
+}
+
 export interface InvestmentDetail extends Investment {
   withdrawals: InvestmentWithdrawalSummary[];
+  profitCredits: ProfitCreditEntry[];
 }
 
 export interface InvestmentListParams extends ListParams {
@@ -267,16 +486,25 @@ export interface InvestmentListParams extends ListParams {
   planId?: number;
 }
 
+export type WithdrawalSource = 'INVESTMENT' | 'WALLET';
+
 export interface Withdrawal {
   id: number;
   reference: string;
   userId: number;
-  investmentId: number;
-  investmentReference: string;
-  planName: string;
+  source: WithdrawalSource;
+  /** CAPITAL withdrawals carry the capital withdrawal fee; PROFIT withdrawals are free */
+  bucket: WalletBucket;
+  investmentId: number | null;
+  investmentReference: string | null;
+  planName: string | null;
   principalAmount: number;
   profitAmount: number;
+  /** Gross requested; netAmount = totalAmount - feeAmount is what gets paid */
   totalAmount: number;
+  feePercent: number;
+  feeAmount: number;
+  netAmount: number;
   isEarly: boolean;
   payoutMethod: PayoutMethod;
   payoutUpiId: string | null;
@@ -315,9 +543,35 @@ export interface NotificationListParams {
   unreadOnly?: boolean;
 }
 
+export type KycReviewAction = 'VERIFY' | 'REJECT' | 'REQUEST_RESUBMISSION' | 'PUT_UNDER_REVIEW' | 'SUSPEND';
+
+export interface KycHistoryEntry {
+  id: number;
+  action: KycReviewAction;
+  remarks: string | null;
+  createdAt: string;
+}
+
+export interface KycSubmittedDetails {
+  maskedPan: string | null;
+  maskedAadhaar: string | null;
+  maskedAccountNumber: string | null;
+  accountHolderName: string | null;
+  ifscCode: string | null;
+}
+
 export interface KycStatusInfo {
   status: string;
   rejectionReason: string | null;
+  submittedAt: string | null;
+  reviewedAt: string | null;
+  hasPassbook: boolean;
+  hasPan: boolean;
+  hasAadhaar: boolean;
+  hasAadhaarBack: boolean;
+  details: KycSubmittedDetails | null;
+  history: KycHistoryEntry[];
+  nextStep: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -507,13 +761,30 @@ export const api = {
     return { success: res.ok && json.success !== false, message: json.message, data: json.data };
   },
 
+  // Auth: customer login step 2. Throws ApiError on a wrong / expired code.
+  async verifyLoginOtp(challengeId: string, otp: string): Promise<LoginSession> {
+    const result = await request<LoginSession>('/auth/login/verify-otp', {
+      method: 'POST',
+      body: { challengeId, otp: otp.trim() },
+    });
+    return result.data;
+  },
+
+  // Auth: email a fresh login code for the same sign-in attempt
+  async resendLoginOtp(challengeId: string): Promise<LoginOtpChallenge & { message: string }> {
+    const result = await request<LoginOtpChallenge>('/auth/login/resend-otp', { method: 'POST', body: { challengeId } });
+    return { ...result.data, message: result.message };
+  },
+
   // Auth: Register (matches backend registerSchema)
   async register(data: {
     name: string;
     email: string;
     phone: string;
     password: string;
-    referralNumber?: string | null;
+    confirmPassword: string;
+    referralNumber: string;
+    acceptedTerms: boolean;
   }) {
     // Throws ApiError with the server's message (or the first validation error) on failure.
     const result = await request<unknown>('/auth/register', {
@@ -523,7 +794,9 @@ export const api = {
         email: data.email.trim(),
         phone: data.phone.trim(),
         password: data.password,
-        referralNumber: data.referralNumber ? data.referralNumber.trim() : undefined,
+        confirmPassword: data.confirmPassword,
+        referralNumber: data.referralNumber.trim().toUpperCase(),
+        acceptedTerms: data.acceptedTerms,
       },
     });
     return { success: true as const, message: result.message };
@@ -551,9 +824,20 @@ export const api = {
     const data = res.success && res.data && typeof res.data === 'object' ? res.data : null;
     const status = data?.kyc_status ?? data?.kycStatus ?? data?.status;
     const reason = data?.rejectionReason ?? data?.rejection_reason;
+    const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+    const details = data?.details && typeof data.details === 'object' ? (data.details as KycSubmittedDetails) : null;
     return {
-      status: typeof status === 'string' && status ? status : 'DRAFT',
-      rejectionReason: typeof reason === 'string' && reason ? reason : null,
+      status: str(status) || 'DRAFT',
+      rejectionReason: str(reason),
+      submittedAt: str(data?.submittedAt),
+      reviewedAt: str(data?.reviewedAt),
+      hasPassbook: Boolean(data?.hasPassbook),
+      hasPan: Boolean(data?.hasPan),
+      hasAadhaar: Boolean(data?.hasAadhaar),
+      hasAadhaarBack: Boolean(data?.hasAadhaarBack),
+      details,
+      history: Array.isArray(data?.history) ? (data.history as KycHistoryEntry[]) : [],
+      nextStep: str(data?.nextStep),
     };
   },
 
@@ -569,18 +853,18 @@ export const api = {
     return result.message;
   },
 
-  async forgotPassword(identifier: string): Promise<{ expiresInMinutes: number; message: string }> {
+  async forgotPassword(email: string): Promise<{ expiresInMinutes: number; message: string }> {
     const result = await request<{ expiresInMinutes?: number } | null>('/auth/forgot-password', {
       method: 'POST',
-      body: { identifier: identifier.trim() },
+      body: { email: email.trim().toLowerCase() },
     });
     return { expiresInMinutes: Number(result.data?.expiresInMinutes) || 10, message: result.message };
   },
 
-  async resetPassword(identifier: string, otp: string, newPassword: string): Promise<string> {
+  async resetPassword(email: string, otp: string, newPassword: string): Promise<string> {
     const result = await request<unknown>('/auth/reset-password', {
       method: 'POST',
-      body: { identifier: identifier.trim(), otp: otp.trim(), newPassword },
+      body: { email: email.trim().toLowerCase(), otp: otp.trim(), newPassword },
     });
     return result.message;
   },
@@ -618,6 +902,7 @@ export const api = {
   async createDeposit(token: string, input: CreateDepositInput): Promise<Deposit> {
     const formData = new FormData();
     formData.append('amount', String(input.amount));
+    formData.append('paymentMethod', input.paymentMethod);
     formData.append('upiTransactionId', input.upiTransactionId.trim());
     formData.append('receipt', input.receipt);
     return (await request<Deposit>('/wallet/deposits', { method: 'POST', token, body: formData })).data;
@@ -641,12 +926,20 @@ export const api = {
     return Array.isArray(result.data) ? result.data : [];
   },
 
-  async previewInvestment(token: string, planId: number, amount: number): Promise<InvestmentPreview> {
-    return (await request<InvestmentPreview>('/investments/preview', { method: 'POST', token, body: { planId, amount } })).data;
+  async previewInvestment(
+    token: string,
+    planId: number,
+    amount: number,
+    source: WalletBucket = 'CAPITAL'
+  ): Promise<InvestmentPreview> {
+    return (
+      await request<InvestmentPreview>('/investments/preview', { method: 'POST', token, body: { planId, amount, source } })
+    ).data;
   },
 
-  async createInvestment(token: string, planId: number, amount: number): Promise<Investment> {
-    return (await request<Investment>('/investments', { method: 'POST', token, body: { planId, amount } })).data;
+  /** `source` is the wallet that pays: CAPITAL by default, or PROFIT to re-invest earned profit */
+  async createInvestment(token: string, planId: number, amount: number, source: WalletBucket = 'CAPITAL'): Promise<Investment> {
+    return (await request<Investment>('/investments', { method: 'POST', token, body: { planId, amount, source } })).data;
   },
 
   async getInvestments(token: string, params: InvestmentListParams = {}): Promise<Paginated<Investment>> {
@@ -672,6 +965,25 @@ export const api = {
   // -------------------------------------------------------------------------
   async getWithdrawals(token: string, params: WithdrawalListParams = {}): Promise<Paginated<Withdrawal>> {
     return requestList<Withdrawal>('/withdrawals', { token, query: params });
+  },
+
+  /**
+   * Withdraw from the wallet to bank / UPI.
+   * PROFIT: any amount of daily profit / referral commission, no fee.
+   * CAPITAL: the whole available capital balance, less the capital withdrawal fee (amount is ignored).
+   */
+  async requestWalletWithdrawal(
+    token: string,
+    input: { bucket: WalletBucket; amount?: number; payoutMethod?: PayoutMethod }
+  ): Promise<Withdrawal> {
+    const body: Record<string, unknown> = { bucket: input.bucket };
+    if (input.bucket === 'PROFIT') body.amount = input.amount;
+    if (input.payoutMethod) body.payoutMethod = input.payoutMethod;
+    return (await request<Withdrawal>('/wallet/withdrawals', { method: 'POST', token, body })).data;
+  },
+
+  async getMyReferrals(token: string): Promise<ReferralSummary> {
+    return (await request<ReferralSummary>('/referrals/my', { token })).data;
   },
 
   async getWithdrawalProof(token: string, withdrawalId: number): Promise<Blob> {

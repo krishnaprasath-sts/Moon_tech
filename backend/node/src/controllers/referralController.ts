@@ -20,6 +20,22 @@ export class ReferralController {
     }
   }
 
+  public static async adminCommissions(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await ReferralService.adminListCommissions(req.query as any);
+
+      sendResponse({
+        res,
+        statusCode: 200,
+        message: 'Referral commissions retrieved successfully',
+        data: result.commissions,
+        meta: result.meta,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   public static async adminReferrals(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const result = await ReferralService.getAllReferrals(req.query);

@@ -12,22 +12,22 @@ const FAQ = [
   {
     question: 'How do I add money to my wallet?',
     answer:
-      'Go to Wallet, choose Add money, pay the shown amount to our UPI ID from your UPI app, then enter the UPI transaction ID and upload the receipt. Your wallet is credited once an admin verifies the payment.',
+      'Go to Wallet, choose Add money, transfer the amount to the company bank account shown (NEFT, IMPS or RTGS), then enter the transfer reference and upload the receipt. Your wallet is credited once an admin verifies the payment.',
   },
   {
     question: 'How is the profit calculated?',
     answer:
-      'Each plan states its profit: a percentage of your principal or a fixed rupee amount over the plan period. The expected profit and maturity amount are shown before you confirm, as per the plan terms.',
+      'Each plan states a monthly rate on your invested capital, paid as 20 equal credits into your profit wallet on working days at 6:00 AM IST. A one-year plan pays exactly twelve months of the rate.',
   },
   {
     question: 'When can I withdraw?',
     answer:
-      'You can request a withdrawal once an investment matures. Early withdrawal is only possible if an admin has enabled it for that investment, and then only the principal is paid unless the admin decides otherwise.',
+      'Profit any time. Capital any time too: your capital wallet and matured investments are paid in full, while closing a running plan before it ends deducts the early withdrawal fee shown before you confirm.',
   },
   {
     question: 'Where is my money paid?',
     answer:
-      'To the bank account or UPI ID saved under Profile, Bank / UPI details. Keep them up to date before you request a withdrawal.',
+      'To the bank account saved under Profile, Bank details. Keep it up to date before you request a withdrawal.',
   },
 ];
 

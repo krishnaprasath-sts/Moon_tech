@@ -21,4 +21,12 @@ adminReferralRouter.get(
   ReferralController.adminReferrals
 );
 
+// Admin: referral commission ledger (PENDING / CREDITED / CANCELLED)
+adminReferralRouter.get(
+  '/commissions',
+  authenticate,
+  authorize(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EDITOR),
+  ReferralController.adminCommissions
+);
+
 export default router;

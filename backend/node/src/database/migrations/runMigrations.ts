@@ -2,7 +2,7 @@ import { sequelize } from '../../models/index.js';
 import { ensureDatabaseExists } from '../../config/database.js';
 import { logger } from '../../utils/logger.js';
 import { FileService } from '../../services/fileService.js';
-import { applySchemaPatches } from './schemaPatches.js';
+import { applySchemaPatches, applyDataPatches } from './schemaPatches.js';
 
 export async function runMigrations(): Promise<void> {
   try {
@@ -21,6 +21,7 @@ export async function runMigrations(): Promise<void> {
     // Add columns introduced after the first release, then sync models
     await applySchemaPatches();
     await sequelize.sync({ alter: true });
+    await applyDataPatches();
     logger.info('All database tables and indexes synchronized successfully.');
   } catch (error: any) {
     logger.error('Failed to run migrations / sync database:', error);

@@ -8,19 +8,25 @@ import {
   Withdrawal,
   User,
   CustomerProfile,
+  ProfitCredit,
+  ReferralCommission,
 } from '../models/index.js';
 import {
   WalletTxnType,
   WalletTxnDirection,
+  WalletBucket,
   DepositStatus,
   InvestmentStatus,
   WithdrawalStatus,
+  WithdrawalSource,
   NotificationType,
   UserRole,
+  ReferralCommissionStatus,
 } from '../types/index.js';
 import { BadRequestError, NotFoundError } from '../utils/errors.js';
 import { toPaise, fromPaise, formatInr, generateReference } from '../utils/money.js';
 import { toIso, parseDateRange } from '../utils/dates.js';
+import { istDayKey } from '../utils/workingDays.js';
 import { RequestMeta, getPagination, buildMeta } from '../utils/http.js';
 import { ActivityLogService } from './activityLogService.js';
 import { NotificationService } from './notificationService.js';
@@ -30,6 +36,8 @@ export interface LedgerEntryParams {
   userId: number;
   type: WalletTxnType;
   direction: WalletTxnDirection;
+  /** Which balance the entry moves */
+  bucket: WalletBucket;
   amountPaise: number;
   description: string;
   relatedEntity?: string;
@@ -42,11 +50,24 @@ export interface TransactionFilterParams {
   limit?: unknown;
   type?: string;
   direction?: string;
+  bucket?: string;
   userId?: unknown;
   search?: string;
   startDate?: string;
   endDate?: string;
 }
+
+export interface WalletBalances {
+  /** capital + profit */
+  balance: number;
+  capitalBalance: number;
+  profitBalance: number;
+}
+
+export const BUCKET_LABELS: Record<WalletBucket, string> = {
+  [WalletBucket.CAPITAL]: 'capital wallet',
+  [WalletBucket.PROFIT]: 'profit wallet',
+};
 
 export function serializeTransaction(txn: WalletTransaction) {
   return {
@@ -54,6 +75,7 @@ export function serializeTransaction(txn: WalletTransaction) {
     reference: txn.reference,
     type: txn.type,
     direction: txn.direction,
+    bucket: txn.bucket,
     amount: txn.amount,
     balanceBefore: txn.balance_before,
     balanceAfter: txn.balance_after,
@@ -80,7 +102,7 @@ export class WalletService {
     if (!wallet) {
       await Wallet.findOrCreate({
         where: { user_id: userId },
-        defaults: { user_id: userId, balance: 0 },
+        defaults: { user_id: userId, balance: 0, capital_balance: 0, profit_balance: 0 },
         transaction: t,
       });
       wallet = await Wallet.findOne({
@@ -98,16 +120,21 @@ export class WalletService {
   }
 
   /**
-   * Applies a single credit/debit to the wallet and writes the ledger row.
-   * The only code path allowed to change a wallet balance.
+   * Applies a single credit/debit to one wallet bucket and writes the ledger row.
+   * The only code path allowed to change a wallet balance. `balance_before/after`
+   * on the ledger row are the balances of the bucket that moved.
    */
   public static async applyEntry(params: LedgerEntryParams, t: Transaction): Promise<WalletTransaction> {
     if (!Number.isInteger(params.amountPaise) || params.amountPaise <= 0) {
       throw new BadRequestError('Transaction amount must be greater than 0');
     }
+    if (!Object.values(WalletBucket).includes(params.bucket)) {
+      throw new BadRequestError('Unknown wallet bucket');
+    }
 
     const wallet = await this.getLockedWallet(params.userId, t);
-    const beforePaise = toPaise(wallet.balance);
+    const field = params.bucket === WalletBucket.CAPITAL ? 'capital_balance' : 'profit_balance';
+    const beforePaise = toPaise(wallet[field]);
     const afterPaise =
       params.direction === WalletTxnDirection.CREDIT
         ? beforePaise + params.amountPaise
@@ -115,13 +142,14 @@ export class WalletService {
 
     if (afterPaise < 0) {
       throw new BadRequestError(
-        `Insufficient wallet balance. Available: ${formatInr(fromPaise(beforePaise))}, required: ${formatInr(
-          fromPaise(params.amountPaise)
-        )}`
+        `Insufficient ${BUCKET_LABELS[params.bucket]} balance. Available: ${formatInr(
+          fromPaise(beforePaise)
+        )}, required: ${formatInr(fromPaise(params.amountPaise))}`
       );
     }
 
-    wallet.balance = fromPaise(afterPaise);
+    wallet[field] = fromPaise(afterPaise);
+    wallet.balance = fromPaise(toPaise(wallet.capital_balance) + toPaise(wallet.profit_balance));
     await wallet.save({ transaction: t });
 
     return WalletTransaction.create(
@@ -131,6 +159,7 @@ export class WalletService {
         wallet_id: wallet.id,
         type: params.type,
         direction: params.direction,
+        bucket: params.bucket,
         amount: fromPaise(params.amountPaise),
         balance_before: fromPaise(beforePaise),
         balance_after: fromPaise(afterPaise),
@@ -143,34 +172,52 @@ export class WalletService {
     );
   }
 
+  /** Total balance (capital + profit) */
   public static async getBalance(userId: number): Promise<number> {
+    return (await this.getBalances(userId)).balance;
+  }
+
+  public static async getBalances(userId: number): Promise<WalletBalances> {
     const wallet = await Wallet.findOne({ where: { user_id: userId } });
-    return wallet ? wallet.balance : 0;
+    if (!wallet) return { balance: 0, capitalBalance: 0, profitBalance: 0 };
+    return {
+      balance: fromPaise(toPaise(wallet.capital_balance) + toPaise(wallet.profit_balance)),
+      capitalBalance: wallet.capital_balance,
+      profitBalance: wallet.profit_balance,
+    };
   }
 
   /**
    * Wallet + portfolio summary for a customer
    */
   public static async getSummary(userId: number) {
-    const [balance, pendingDeposits, deposits, investments, withdrawals] = await Promise.all([
-      this.getBalance(userId),
-      Deposit.findAll({
-        where: { user_id: userId, status: DepositStatus.PENDING },
-        attributes: ['amount'],
-      }),
-      Deposit.findAll({
-        where: { user_id: userId, status: DepositStatus.APPROVED },
-        attributes: ['amount'],
-      }),
-      Investment.findAll({
-        where: { user_id: userId },
-        attributes: ['amount', 'expected_profit', 'status'],
-      }),
-      Withdrawal.findAll({
-        where: { user_id: userId },
-        attributes: ['total_amount', 'profit_amount', 'status'],
-      }),
-    ]);
+    const [balances, pendingDeposits, deposits, investments, withdrawals, profitCredits, commissions, profitLedger] =
+      await Promise.all([
+        this.getBalances(userId),
+        Deposit.findAll({
+          where: { user_id: userId, status: DepositStatus.PENDING },
+          attributes: ['amount'],
+        }),
+        Deposit.findAll({
+          where: { user_id: userId, status: DepositStatus.APPROVED },
+          attributes: ['amount'],
+        }),
+        Investment.findAll({
+          where: { user_id: userId },
+          attributes: ['amount', 'expected_profit', 'profit_credited', 'status'],
+        }),
+        Withdrawal.findAll({
+          where: { user_id: userId },
+          attributes: ['total_amount', 'profit_amount', 'fee_amount', 'net_amount', 'status', 'source', 'bucket'],
+        }),
+        ProfitCredit.findAll({ where: { user_id: userId }, attributes: ['amount', 'credit_day'] }),
+        ReferralCommission.findAll({ where: { referrer_user_id: userId }, attributes: ['amount', 'status'] }),
+        // Every profit credit that reached the wallet: daily credits and profit paid at maturity
+        WalletTransaction.findAll({
+          where: { user_id: userId, type: WalletTxnType.PROFIT, direction: WalletTxnDirection.CREDIT },
+          attributes: ['amount'],
+        }),
+      ]);
 
     const sum = (values: number[]) => values.reduce((acc, v) => acc + v, 0);
 
@@ -178,21 +225,52 @@ export class WalletService {
       [InvestmentStatus.ACTIVE, InvestmentStatus.MATURED, InvestmentStatus.WITHDRAWAL_REQUESTED].includes(i.status)
     );
     const completedWithdrawals = withdrawals.filter((w) => w.status === WithdrawalStatus.COMPLETED);
+    const openWithdrawals = withdrawals.filter((w) =>
+      [WithdrawalStatus.PENDING, WithdrawalStatus.APPROVED].includes(w.status)
+    );
+    const dailyProfitPaise = sum(profitCredits.map((c) => toPaise(c.amount)));
+    const latestCreditDay = profitCredits.map((c) => String(c.credit_day)).sort().pop() ?? null;
+    const creditedCommissions = commissions.filter((c) => c.status === ReferralCommissionStatus.CREDITED);
+    const pendingCommissions = commissions.filter((c) => c.status === ReferralCommissionStatus.PENDING);
+
+    const todayKey = istDayKey(new Date());
+    const monthPrefix = todayKey.slice(0, 7);
+    const heldWallet = openWithdrawals.filter((w) => w.source === WithdrawalSource.WALLET);
 
     return {
-      balance,
+      ...balances,
+      // Capital locked in running investments; it earns the daily profit
+      investedCapital: fromPaise(sum(locked.map((i) => toPaise(i.amount)))),
       pendingDepositAmount: fromPaise(sum(pendingDeposits.map((d) => toPaise(d.amount)))),
       pendingDepositCount: pendingDeposits.length,
       totalDeposited: fromPaise(sum(deposits.map((d) => toPaise(d.amount)))),
       investedAmount: fromPaise(sum(locked.map((i) => toPaise(i.amount)))),
       expectedProfit: fromPaise(sum(locked.map((i) => toPaise(i.expected_profit)))),
-      totalProfitEarned: fromPaise(sum(completedWithdrawals.map((w) => toPaise(w.profit_amount)))),
-      totalWithdrawn: fromPaise(sum(completedWithdrawals.map((w) => toPaise(w.total_amount)))),
+      // Profit that has reached the wallet: daily credits + profit paid at maturity (PROFIT ledger credits)
+      totalProfitEarned: fromPaise(sum(profitLedger.map((t) => toPaise(t.amount)))),
+      dailyProfitCredited: fromPaise(dailyProfitPaise),
+      profitCreditedToday: fromPaise(
+        sum(profitCredits.filter((c) => String(c.credit_day) === todayKey).map((c) => toPaise(c.amount)))
+      ),
+      profitCreditedThisMonth: fromPaise(
+        sum(profitCredits.filter((c) => String(c.credit_day).startsWith(monthPrefix)).map((c) => toPaise(c.amount)))
+      ),
+      lastProfitCreditDay: latestCreditDay,
+      referralEarnings: fromPaise(sum(creditedCommissions.map((c) => toPaise(c.amount)))),
+      referralEarningsPending: fromPaise(sum(pendingCommissions.map((c) => toPaise(c.amount)))),
+      totalWithdrawn: fromPaise(sum(completedWithdrawals.map((w) => toPaise(w.net_amount)))),
+      totalFeesPaid: fromPaise(sum(completedWithdrawals.map((w) => toPaise(w.fee_amount)))),
       activeInvestments: investments.filter((i) => i.status === InvestmentStatus.ACTIVE).length,
       maturedInvestments: investments.filter((i) => i.status === InvestmentStatus.MATURED).length,
-      pendingWithdrawals: withdrawals.filter((w) =>
-        [WithdrawalStatus.PENDING, WithdrawalStatus.APPROVED].includes(w.status)
-      ).length,
+      pendingWithdrawals: openWithdrawals.length,
+      // Wallet money reserved by withdrawal requests that are still being processed
+      pendingWithdrawalAmount: fromPaise(sum(heldWallet.map((w) => toPaise(w.total_amount)))),
+      pendingCapitalWithdrawalAmount: fromPaise(
+        sum(heldWallet.filter((w) => w.bucket === WalletBucket.CAPITAL).map((w) => toPaise(w.total_amount)))
+      ),
+      pendingProfitWithdrawalAmount: fromPaise(
+        sum(heldWallet.filter((w) => w.bucket === WalletBucket.PROFIT).map((w) => toPaise(w.total_amount)))
+      ),
     };
   }
 
@@ -205,6 +283,10 @@ export class WalletService {
 
     if (params.direction && Object.values(WalletTxnDirection).includes(params.direction as WalletTxnDirection)) {
       where.direction = params.direction;
+    }
+
+    if (params.bucket && Object.values(WalletBucket).includes(params.bucket as WalletBucket)) {
+      where.bucket = params.bucket;
     }
 
     const { start, end } = parseDateRange(params.startDate, params.endDate);
@@ -317,8 +399,9 @@ export class WalletService {
           userId,
           type: WalletTxnType.ADJUSTMENT,
           direction: input.direction,
+          bucket: input.bucket,
           amountPaise,
-          description: `Admin adjustment: ${input.reason}`,
+          description: `Admin adjustment (${BUCKET_LABELS[input.bucket]}): ${input.reason}`,
           relatedEntity: 'ADJUSTMENT',
           createdBy: adminId,
         },
@@ -333,9 +416,9 @@ export class WalletService {
       entityId: txn.wallet_id,
       description: `Admin #${adminId} ${input.direction === WalletTxnDirection.CREDIT ? 'credited' : 'debited'} ${formatInr(
         input.amount
-      )} ${input.direction === WalletTxnDirection.CREDIT ? 'to' : 'from'} customer #${userId} wallet (${txn.reference}). Reason: ${
-        input.reason
-      }`,
+      )} ${input.direction === WalletTxnDirection.CREDIT ? 'to' : 'from'} customer #${userId} ${BUCKET_LABELS[input.bucket]} (${
+        txn.reference
+      }). Reason: ${input.reason}`,
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
     });
@@ -346,7 +429,7 @@ export class WalletService {
       title: input.direction === WalletTxnDirection.CREDIT ? 'Wallet credited' : 'Wallet debited',
       message: `${formatInr(input.amount)} was ${
         input.direction === WalletTxnDirection.CREDIT ? 'credited to' : 'debited from'
-      } your wallet. Reason: ${input.reason}. Reference: ${txn.reference}.`,
+      } your ${BUCKET_LABELS[input.bucket]}. Reason: ${input.reason}. Reference: ${txn.reference}.`,
       relatedEntity: 'WALLET_TRANSACTION',
       relatedId: txn.id,
     });

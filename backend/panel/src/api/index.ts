@@ -29,9 +29,12 @@ import {
   Announcement,
   FinanceReport,
   ReportType,
+  PayoutJobStatus,
+  PayoutRunResult,
+  AdminReferralCommission,
 } from '../types';
 
-export type KycDocumentType = 'passbook' | 'pan' | 'aadhaar';
+export type KycDocumentType = 'passbook' | 'pan' | 'aadhaar' | 'aadhaar-back';
 
 // The KYC list may carry its counters at the top level or inside meta
 export type KycListApiResponse = ApiResponse<KycSubmissionSummary[]> & {
@@ -171,6 +174,22 @@ export const referralApi = {
     const res = await apiClient.get<ApiResponse<ReferralRecord[]>>('/admin/referrals', { params });
     return res.data;
   },
+  getCommissions: async (params?: { page?: number; limit?: number; status?: string }) => {
+    const res = await apiClient.get<ApiResponse<AdminReferralCommission[]>>('/admin/referrals/commissions', { params });
+    return res.data;
+  },
+};
+
+// Daily profit / referral commission payout job (06:00 AM IST, working days)
+export const payoutApi = {
+  getStatus: async () => {
+    const res = await apiClient.get<ApiResponse<PayoutJobStatus>>('/admin/payouts/status');
+    return res.data;
+  },
+  run: async () => {
+    const res = await apiClient.post<ApiResponse<PayoutRunResult>>('/admin/payouts/run');
+    return res.data;
+  },
 };
 
 export const activityLogApi = {
@@ -200,6 +219,7 @@ export interface InvestmentListParams extends FinanceListParams {
 export interface WalletLedgerParams extends Omit<FinanceListParams, 'status'> {
   type?: string;
   direction?: string;
+  bucket?: string;
 }
 
 export interface ReportParams {
@@ -227,8 +247,22 @@ export const financeApi = {
     const res = await apiClient.put<ApiResponse<PlatformSettings>>('/admin/settings', data);
     return res.data;
   },
+  /** Upload a custom UPI QR image (JPEG / PNG / WEBP, up to 2 MB) shown to customers instead of the generated QR */
+  uploadUpiQr: async (file: File) => {
+    const form = new FormData();
+    form.append('qrImage', file);
+    const res = await apiClient.post<ApiResponse<PlatformSettings>>('/admin/settings/upi-qr', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+  },
+  /** Remove the custom UPI QR image; the QR is generated from the UPI ID again */
+  removeUpiQr: async () => {
+    const res = await apiClient.delete<ApiResponse<PlatformSettings>>('/admin/settings/upi-qr');
+    return res.data;
+  },
 
-  // Payments (UPI deposits)
+  // Payments (bank transfer deposits)
   getDeposits: async (params?: FinanceListParams) => {
     const res = await apiClient.get<FinanceListResponse<AdminDeposit[]>>('/admin/deposits', { params });
     return res.data;

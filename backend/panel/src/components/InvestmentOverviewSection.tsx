@@ -13,7 +13,9 @@ import {
   AlertCircle,
   CalendarClock,
 } from 'lucide-react';
-import { useFinanceDashboard } from '../hooks/useFinance';
+import { useFinanceDashboard, useRunPayouts } from '../hooks/useFinance';
+import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { StatCard } from './StatCard';
 import { formatINR, formatDate, formatDateTime, formatNumber, getApiErrorMessage, humanize } from '../utils/finance';
 
@@ -23,6 +25,28 @@ const panelClass =
 // Primary dashboard content: wallet payments, investments, maturities and withdrawal payouts
 export const InvestmentOverviewSection: React.FC = () => {
   const { data: finance, isLoading, isError, error, refetch } = useFinanceDashboard();
+  const { isAdmin } = useAuth();
+  const { toast } = useToast();
+  const runPayouts = useRunPayouts();
+
+  const handleRunPayouts = async () => {
+    try {
+      const res = await runPayouts.mutateAsync();
+      const result = res.data;
+      if (result && result.profitCredits + result.commissions > 0) {
+        toast.success(
+          `${formatNumber(result.profitCredits)} daily profit credit(s) worth ${formatINR(result.profitAmount)} and ${formatNumber(
+            result.commissions
+          )} referral commission(s) worth ${formatINR(result.commissionAmount)} were credited.`,
+          'Payout run complete'
+        );
+      } else {
+        toast.info(res.message || 'Nothing was due. Daily profit and commissions are already up to date.', 'Payout run complete');
+      }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Failed to run the payout job'));
+    }
+  };
 
   return (
     <section className="space-y-4" aria-labelledby="investment-overview-title">
@@ -131,7 +155,22 @@ export const InvestmentOverviewSection: React.FC = () => {
               icon={IndianRupee}
               colorClass="text-emerald-600 dark:text-emerald-400"
               iconBgClass="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
-              subtitle={`${formatINR(finance.totalWithdrawn)} withdrawn in total`}
+              subtitle={`${formatINR(finance.totalDailyProfitCredited ?? 0)} credited daily • ${formatINR(finance.totalWithdrawn)} paid out • ${formatINR(
+                finance.totalWithdrawalFees ?? 0
+              )} fees retained`}
+            />
+
+            <StatCard
+              title="Referral Commission"
+              value={formatINR(finance.totalReferralCommissionPaid ?? 0)}
+              icon={Users}
+              colorClass="text-violet-600 dark:text-violet-400"
+              iconBgClass="bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20"
+              subtitle={
+                Number(finance.pendingReferralCommissions) > 0
+                  ? `${formatNumber(finance.pendingReferralCommissions)} legacy pending (${formatINR(finance.pendingReferralCommissionAmount ?? 0)})`
+                  : 'Credited instantly when a referred customer invests'
+              }
             />
 
             <StatCard
@@ -140,7 +179,9 @@ export const InvestmentOverviewSection: React.FC = () => {
               icon={ArrowLeftRight}
               colorClass="text-sky-600 dark:text-sky-400"
               iconBgClass="bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20"
-              subtitle={`${formatNumber(finance.walletTransactions)} ledger entries`}
+              subtitle={`${formatINR(finance.totalCapitalBalance ?? 0)} capital • ${formatINR(finance.totalProfitBalance ?? 0)} profit • ${formatNumber(
+                finance.walletTransactions
+              )} ledger entries`}
             />
 
             <StatCard
@@ -150,6 +191,41 @@ export const InvestmentOverviewSection: React.FC = () => {
               iconBgClass="bg-brand-500/10 text-brand-600 dark:text-brand-400 border border-brand-500/20"
               subtitle={`${formatNumber(finance.activeUsers)} active`}
             />
+          </div>
+
+          {/* Daily payout job */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/20">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                <CalendarClock className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-900 dark:text-white">Daily profit &amp; referral payouts</p>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5 leading-relaxed">
+                  {finance.payoutSchedule || 'Every working day (Monday to Friday) at 6:00 AM IST'}. Saturdays and Sundays are skipped.
+                  {' '}
+                  {finance.lastPayoutRunAt
+                    ? `Last run ${formatDateTime(finance.lastPayoutRunAt)}.`
+                    : 'The job has not run yet.'}{' '}
+                  {formatNumber(finance.dailyProfitCredits ?? 0)} daily credits so far
+                  {Number(finance.walletWithdrawalsPending) > 0 &&
+                    ` • ${formatNumber(finance.walletWithdrawalsPending)} wallet withdrawal(s) awaiting payout`}
+                  .
+                </p>
+              </div>
+            </div>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleRunPayouts}
+                disabled={runPayouts.isPending}
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-xs font-bold shadow-sm transition whitespace-nowrap"
+                title="Credits any due working days and commissions now. Safe to run any time; nothing is paid twice."
+              >
+                <IndianRupee className="w-3.5 h-3.5" />
+                {runPayouts.isPending ? 'Running...' : 'Run payouts now'}
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

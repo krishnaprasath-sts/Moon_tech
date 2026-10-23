@@ -29,7 +29,7 @@ export default function ErrorPage({
           <div>
             <h1 className="text-xl font-bold text-zinc-950 dark:text-white tracking-tight">Something went wrong</h1>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2 leading-relaxed">
-              An unexpected error occurred while showing this page. Your wallet, investments and requests are not
+              An unexpected error occurred while showing this page. Your wallet, plans and requests are not
               affected. Please try again, and if the problem continues, sign out and back in.
             </p>
           </div>

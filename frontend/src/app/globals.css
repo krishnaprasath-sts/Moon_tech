@@ -122,7 +122,7 @@ select:disabled {
 @keyframes moontech-fade-in {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -131,11 +131,74 @@ select:disabled {
 }
 
 .animate-fade-in {
-  animation: moontech-fade-in 0.18s ease-out both;
+  animation: moontech-fade-in 0.25s ease-out both;
+}
+
+/* Dialog overlays: opacity only. A transform or backdrop-filter on the overlay makes some
+   Chrome builds skip painting the dialog contents on phones. */
+@keyframes moontech-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-overlay-in {
+  animation: moontech-overlay-in 0.2s ease-out both;
+}
+
+/* Floating animation */
+@keyframes float-slow {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.animate-float {
+  animation: float-slow 4.5s ease-in-out infinite;
+}
+
+/* Gentle ambient pulse glow */
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 0.2;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(1.08);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 7s ease-in-out infinite;
+}
+
+/* Gradient shimmer sweep */
+@keyframes shimmer-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(200%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer-sweep 3s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-fade-in {
+  .animate-fade-in,
+  .animate-overlay-in,
+  .animate-float,
+  .animate-pulse-glow,
+  .animate-shimmer {
     animation: none;
   }
 }

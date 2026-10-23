@@ -8,6 +8,7 @@ import { TableStateRow } from '../components/TableStateRow';
 import { FinanceStatusBadge } from '../components/FinanceStatusBadge';
 import { FileViewerModal } from '../components/FileViewerModal';
 import { ActionModal } from '../components/ActionModal';
+import { DepositVerificationPanel } from '../components/DepositVerificationPanel';
 import { PageHeader } from '../components/PageHeader';
 import { RefreshButton } from '../components/RefreshButton';
 import { SearchInput } from '../components/SearchInput';
@@ -28,10 +29,10 @@ import {
 import { formatINR, formatDateTime, getApiErrorMessage } from '../utils/finance';
 
 const TABS = [
+  { id: 'ALL', label: 'All Payments' },
   { id: 'PENDING', label: 'Pending' },
   { id: 'APPROVED', label: 'Approved' },
   { id: 'REJECTED', label: 'Rejected' },
-  { id: 'ALL', label: 'All Payments' },
 ];
 
 const EMPTY_TEXT: Record<string, string> = {
@@ -141,7 +142,7 @@ export const PaymentsPage: React.FC = () => {
             setSearch(value);
             setPage(1);
           }}
-          placeholder="Search reference, UPI transaction ID, customer name, email or phone"
+          placeholder="Search reference, transaction ID / UTR, customer name, email or phone"
           label="Search payments"
           className="flex-1"
         />
@@ -164,7 +165,7 @@ export const PaymentsPage: React.FC = () => {
                 <th className="py-3.5 px-4">Reference</th>
                 <th className="py-3.5 px-4">Customer</th>
                 <th className="py-3.5 px-4 text-right">Amount</th>
-                <th className="py-3.5 px-4">UPI Transaction ID</th>
+                <th className="py-3.5 px-4">Paid via / reference</th>
                 <th className="py-3.5 px-4">Submitted</th>
                 <th className="py-3.5 px-4">Status</th>
                 <th className="py-3.5 px-4 text-right">Actions</th>
@@ -208,8 +209,17 @@ export const PaymentsPage: React.FC = () => {
                     <td className={`py-3.5 px-4 font-bold text-slate-900 dark:text-white ${numCellClass}`}>
                       {formatINR(deposit.amount)}
                     </td>
-                    <td className="py-3.5 px-4 font-mono text-slate-700 dark:text-slate-300 break-all">
-                      {deposit.upiTransactionId}
+                    <td className="py-3.5 px-4 break-all">
+                      <span
+                        className={`inline-block text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md mb-1 ${
+                          deposit.paymentMethod === 'BANK_TRANSFER'
+                            ? 'bg-violet-500/10 text-violet-700 dark:text-violet-300'
+                            : 'bg-sky-500/10 text-sky-700 dark:text-sky-300'
+                        }`}
+                      >
+                        {deposit.paymentMethod === 'BANK_TRANSFER' ? 'Bank transfer' : 'UPI'}
+                      </span>
+                      <div className="font-mono text-slate-700 dark:text-slate-300">{deposit.upiTransactionId}</div>
                     </td>
                     <td className="py-3.5 px-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">
                       {formatDateTime(deposit.createdAt)}
@@ -274,7 +284,7 @@ export const PaymentsPage: React.FC = () => {
           receiptDeposit
             ? `${receiptDeposit.customerName || receiptDeposit.customerEmail || 'Customer'} • ${formatINR(
                 receiptDeposit.amount
-              )} • UPI Txn ${receiptDeposit.upiTransactionId}`
+              )} • ${receiptDeposit.paymentMethod === 'BANK_TRANSFER' ? 'Bank ref' : 'UPI Txn'} ${receiptDeposit.upiTransactionId}`
             : undefined
         }
         downloadName={`receipt_${receiptDeposit?.reference || 'payment'}`}
@@ -294,7 +304,7 @@ export const PaymentsPage: React.FC = () => {
               <strong className="text-slate-900 dark:text-white">
                 {approvingDeposit.customerName || approvingDeposit.customerEmail}
               </strong>
-              . Confirm that UPI transaction{' '}
+              . Confirm that {approvingDeposit.paymentMethod === 'BANK_TRANSFER' ? 'bank transfer' : 'UPI transaction'}{' '}
               <span className="font-mono font-semibold">{approvingDeposit.upiTransactionId}</span> matches the receipt
               and your bank statement. This cannot be undone.
             </>
@@ -304,7 +314,9 @@ export const PaymentsPage: React.FC = () => {
         placeholder="e.g. Amount verified against bank statement."
         confirmText="Approve & Credit Wallet"
         isLoading={approveMutation.isPending}
-      />
+      >
+        {approvingDeposit && <DepositVerificationPanel deposit={approvingDeposit} />}
+      </ActionModal>
 
       <ActionModal
         isOpen={!!rejectingDeposit}

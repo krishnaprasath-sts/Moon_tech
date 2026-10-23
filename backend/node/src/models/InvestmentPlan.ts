@@ -1,6 +1,6 @@
 import { DataTypes, Model, Optional } from 'sequelize';
 import { sequelize } from '../config/database.js';
-import { ProfitType } from '../types/index.js';
+import { ProfitType, ProfitPayoutMode, RateBasis } from '../types/index.js';
 import { decimalGetter } from '../utils/money.js';
 
 export interface InvestmentPlanAttributes {
@@ -9,9 +9,14 @@ export interface InvestmentPlanAttributes {
   description?: string | null;
   min_amount: number;
   max_amount: number;
+  /** 0 = open-ended: the investment runs until the customer withdraws the capital */
   duration_days: number;
   profit_type: ProfitType;
   profit_value: number;
+  payout_mode: ProfitPayoutMode;
+  rate_basis: RateBasis;
+  /** Days during which the capital cannot be withdrawn (0 = none) */
+  lock_in_days: number;
   is_active: boolean;
   is_featured: boolean;
   featured_tagline?: string | null;
@@ -23,7 +28,17 @@ export interface InvestmentPlanAttributes {
 export interface InvestmentPlanCreationAttributes
   extends Optional<
     InvestmentPlanAttributes,
-    'id' | 'description' | 'is_active' | 'is_featured' | 'featured_tagline' | 'sort_order' | 'created_at' | 'updated_at'
+    | 'id'
+    | 'description'
+    | 'payout_mode'
+    | 'rate_basis'
+    | 'lock_in_days'
+    | 'is_active'
+    | 'is_featured'
+    | 'featured_tagline'
+    | 'sort_order'
+    | 'created_at'
+    | 'updated_at'
   > {}
 
 export class InvestmentPlan
@@ -38,6 +53,9 @@ export class InvestmentPlan
   declare public duration_days: number;
   declare public profit_type: ProfitType;
   declare public profit_value: number;
+  declare public payout_mode: ProfitPayoutMode;
+  declare public rate_basis: RateBasis;
+  declare public lock_in_days: number;
   declare public is_active: boolean;
   declare public is_featured: boolean;
   declare public featured_tagline: string | null;
@@ -80,11 +98,28 @@ InvestmentPlan.init(
       allowNull: false,
       defaultValue: ProfitType.PERCENTAGE,
     },
-    // PERCENTAGE: % of principal earned over the full period. FIXED: rupee amount.
+    // AT_MATURITY + PERCENTAGE: % of principal earned over the full period. FIXED: rupee amount.
+    // DAILY: % of principal credited every working day.
     profit_value: {
       type: DataTypes.DECIMAL(18, 2),
       allowNull: false,
       get: decimalGetter('profit_value'),
+    },
+    payout_mode: {
+      type: DataTypes.ENUM(...Object.values(ProfitPayoutMode)),
+      allowNull: false,
+      defaultValue: ProfitPayoutMode.AT_MATURITY,
+    },
+    // DAILY plans only: what profit_value is a percentage of (per month / per year / per day)
+    rate_basis: {
+      type: DataTypes.ENUM(...Object.values(RateBasis)),
+      allowNull: false,
+      defaultValue: RateBasis.PER_MONTH,
+    },
+    lock_in_days: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
     },
     is_active: {
       type: DataTypes.BOOLEAN,

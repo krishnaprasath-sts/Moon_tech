@@ -9,7 +9,11 @@ import { WithdrawalService } from '../services/withdrawalService.js';
 import { NotificationService } from '../services/notificationService.js';
 import { FinanceDashboardService } from '../services/financeDashboardService.js';
 import { ReportService } from '../services/reportService.js';
+import { DailyPayoutService } from '../services/dailyPayoutService.js';
+import { ActivityLogService } from '../services/activityLogService.js';
 import { streamFile } from './financeController.js';
+import { FileService } from '../services/fileService.js';
+import { BadRequestError } from '../utils/errors.js';
 
 /**
  * Admin-facing investment platform endpoints
@@ -23,7 +27,7 @@ export class AdminFinanceController {
 
   public static getCustomerFinance = asyncHandler(async (req, res) => {
     const customerId = parseIdParam(req.params.id, 'customer ID');
-    const finance = await FinanceDashboardService.getCustomerFinance(customerId);
+    const finance = await FinanceDashboardService.getCustomerFinance(customerId, req.user!);
     sendResponse({ res, message: 'Customer finance details retrieved successfully', data: finance });
   });
 
@@ -36,6 +40,24 @@ export class AdminFinanceController {
   public static updateSettings = asyncHandler(async (req, res) => {
     const settings = await SettingsService.updateSettings(req.body, req.user!.id, getRequestMeta(req));
     sendResponse({ res, message: 'Settings updated successfully', data: settings });
+  });
+
+  /** Upload a custom UPI QR image shown to customers instead of the generated one */
+  public static uploadUpiQr = asyncHandler(async (req, res) => {
+    if (!req.file) throw new BadRequestError('Choose a QR image to upload (JPEG, PNG or WEBP, up to 2 MB)');
+    const fileName = await FileService.saveUpiQrImage(req.file);
+    const previous = await SettingsService.setUpiQrImage(fileName, req.user!.id, getRequestMeta(req));
+    await FileService.deleteUpiQrImage(previous);
+    const settings = await SettingsService.getSettings();
+    sendResponse({ res, message: 'UPI QR image updated. Customers see it immediately.', data: settings });
+  });
+
+  /** Remove the custom UPI QR image; the QR is generated from the UPI ID again */
+  public static removeUpiQr = asyncHandler(async (req, res) => {
+    const previous = await SettingsService.setUpiQrImage('', req.user!.id, getRequestMeta(req));
+    await FileService.deleteUpiQrImage(previous);
+    const settings = await SettingsService.getSettings();
+    sendResponse({ res, message: 'Custom UPI QR removed. The QR is now generated from the UPI ID.', data: settings });
   });
 
   // --------------------------------------------------------------- Payments
@@ -278,6 +300,49 @@ export class AdminFinanceController {
   });
 
   // ---------------------------------------------------------------- Reports
+  // ----------------------------------------------------------------- Payouts
+  public static getPayoutStatus = asyncHandler(async (_req, res) => {
+    const lastRunAt = await DailyPayoutService.getLastRunAt();
+    sendResponse({
+      res,
+      message: 'Payout job status retrieved successfully',
+      data: {
+        schedule: DailyPayoutService.scheduleDescription(),
+        lastRunAt: lastRunAt ? lastRunAt.toISOString() : null,
+      },
+    });
+  });
+
+  /**
+   * Runs the daily payout job immediately. Safe to call any time: it only credits
+   * working days and commissions that are due and not yet paid.
+   */
+  public static runPayouts = asyncHandler(async (req, res) => {
+    const result = await DailyPayoutService.run();
+    if (!result) {
+      sendResponse({ res, statusCode: 202, message: 'A payout run is already in progress. Please try again shortly.' });
+      return;
+    }
+
+    await ActivityLogService.log({
+      userId: req.user!.id,
+      action: 'PAYOUT_JOB_RUN',
+      entity: 'SYSTEM',
+      description: `Admin #${req.user!.id} ran the payout job manually: ${result.profitCredits} profit credit(s), ${result.commissions} referral commission(s)`,
+      ipAddress: getRequestMeta(req).ipAddress,
+      userAgent: getRequestMeta(req).userAgent,
+    });
+
+    sendResponse({
+      res,
+      message:
+        result.profitCredits + result.commissions > 0
+          ? `Payout run complete: ${result.profitCredits} profit credit(s) and ${result.commissions} referral commission(s) credited.`
+          : 'Payout run complete: nothing was due.',
+      data: result,
+    });
+  });
+
   public static getReport = asyncHandler(async (req, res) => {
     const { startDate, endDate, format } = req.query as Record<string, string | undefined>;
     const report = await ReportService.generate(req.params.type, { startDate, endDate });

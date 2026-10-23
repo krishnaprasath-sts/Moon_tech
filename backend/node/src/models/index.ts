@@ -15,6 +15,9 @@ import { Notification, Announcement } from './Notification.js';
 import { SystemSetting } from './SystemSetting.js';
 import { UserPayoutDetail } from './UserPayoutDetail.js';
 import { PasswordReset } from './PasswordReset.js';
+import { LoginOtp } from './LoginOtp.js';
+import { ProfitCredit } from './ProfitCredit.js';
+import { ReferralCommission } from './ReferralCommission.js';
 import { sequelize } from '../config/database.js';
 
 // User <-> CustomerProfile
@@ -185,6 +188,39 @@ Withdrawal.belongsTo(User, {
   as: 'user',
 });
 
+// Investment / User <-> ProfitCredit (daily profit ledger)
+Investment.hasMany(ProfitCredit, {
+  foreignKey: 'investment_id',
+  as: 'profitCredits',
+  onDelete: 'CASCADE',
+});
+ProfitCredit.belongsTo(Investment, {
+  foreignKey: 'investment_id',
+  as: 'investment',
+});
+ProfitCredit.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
+// Referral commissions
+ReferralCommission.belongsTo(User, {
+  foreignKey: 'referrer_user_id',
+  as: 'referrer',
+});
+ReferralCommission.belongsTo(User, {
+  foreignKey: 'referred_user_id',
+  as: 'referred',
+});
+ReferralCommission.belongsTo(Investment, {
+  foreignKey: 'investment_id',
+  as: 'investment',
+});
+Investment.hasOne(ReferralCommission, {
+  foreignKey: 'investment_id',
+  as: 'referralCommission',
+});
+
 // User <-> Notification
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -225,6 +261,17 @@ PasswordReset.belongsTo(User, {
   as: 'user',
 });
 
+// User <-> LoginOtp
+User.hasMany(LoginOtp, {
+  foreignKey: 'user_id',
+  as: 'loginOtps',
+  onDelete: 'CASCADE',
+});
+LoginOtp.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
 export {
   sequelize,
   User,
@@ -245,5 +292,8 @@ export {
   SystemSetting,
   UserPayoutDetail,
   PasswordReset,
+  LoginOtp,
+  ProfitCredit,
+  ReferralCommission,
 };
 

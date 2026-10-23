@@ -19,6 +19,8 @@ import {
   KycReviewAction,
   ReferralStatus,
   ProfitType,
+  ProfitPayoutMode,
+  RateBasis,
 } from '../../types/index.js';
 
 import { encryptData } from '../../utils/encryption.js';
@@ -29,7 +31,78 @@ import { FileService } from '../../services/fileService.js';
 /**
  * Seeds the default investment plans. Idempotent: does nothing once any plan exists.
  */
+/**
+ * Monthly-rate plans: the monthly profit is split into 20 working-day credits (4 weeks x 5
+ * days) paid to the profit wallet at 06:00 AM IST, Monday to Friday. Added once; the admin
+ * can change the rates, limits and periods from the panel afterwards.
+ *
+ * Example on 1,00,000: Regular 5% -> 5,000 a month, 1,250 a week, 250 a working day.
+ *                      Deposit 6% -> 6,000 a month, 1,500 a week, 300 a working day.
+ */
+export async function seedDailyProfitPlans(): Promise<void> {
+  const existing = await InvestmentPlan.count({
+    where: { payout_mode: ProfitPayoutMode.DAILY, rate_basis: RateBasis.PER_MONTH },
+  });
+  if (existing > 0) return;
+
+  // Plans created when the rate meant "% per working day" must not take new money
+  const [retired] = await InvestmentPlan.update(
+    { is_active: false, is_featured: false },
+    { where: { payout_mode: ProfitPayoutMode.DAILY, rate_basis: RateBasis.PER_DAY } }
+  );
+  if (retired > 0) logger.info(`Deactivated ${retired} legacy per-day plan(s)`);
+
+  await InvestmentPlan.bulkCreate([
+    {
+      name: 'Regular Plan',
+      description:
+        'Earn 5% of your capital every month, paid into your profit wallet every working day (Monday to Friday) at 6:00 AM as 20 equal credits a month. Withdraw your profit any time. Close the plan whenever you like; capital withdrawn before the plan ends carries the early withdrawal fee.',
+      min_amount: 1000,
+      max_amount: 500000,
+      duration_days: 0,
+      lock_in_days: 0,
+      profit_type: ProfitType.PERCENTAGE,
+      profit_value: 5,
+      payout_mode: ProfitPayoutMode.DAILY,
+      rate_basis: RateBasis.PER_MONTH,
+      is_active: true,
+      is_featured: true,
+      featured_tagline: '5% monthly profit, credited every working day. No lock-in.',
+      sort_order: 0,
+    },
+    {
+      name: 'Deposit Plan',
+      description:
+        'A one-year plan that earns 6% of your capital every month (72% over the year), paid into your profit wallet every working day (Monday to Friday) at 6:00 AM as 20 equal credits a month. Withdraw your profit any time. Your capital returns to your capital wallet at maturity with no fee; you can also close the plan earlier, less the early withdrawal fee.',
+      min_amount: 5000,
+      max_amount: 1000000,
+      duration_days: 365,
+      lock_in_days: 0,
+      profit_type: ProfitType.PERCENTAGE,
+      profit_value: 6,
+      payout_mode: ProfitPayoutMode.DAILY,
+      rate_basis: RateBasis.PER_MONTH,
+      is_active: true,
+      is_featured: true,
+      featured_tagline: '6% monthly profit on a one-year deposit.',
+      sort_order: 1,
+    },
+  ]);
+
+  logger.info('Created monthly-rate investment plans (Regular Plan 5%, Deposit Plan 6%)');
+}
+
+/**
+ * The product offers the two monthly-rate plans (Regular / Deposit). The legacy
+ * maturity-paid sample plans below are no longer created; existing databases keep
+ * them deactivated so their investment history stays intact.
+ */
 export async function seedInvestmentDefaults(): Promise<void> {
+  await seedDailyProfitPlans();
+}
+
+// Kept for reference only; not called.
+export async function seedLegacyMaturityPlans(): Promise<void> {
   const planCount = await InvestmentPlan.count();
   if (planCount > 0) return;
 

@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs';
 import { Op } from 'sequelize';
 import { User, CustomerProfile, KycProfile, Referral, ActivityLog, Investment } from '../models/index.js';
-import { CustomerFilterParams, UserRole, UserStatus, KycStatus, ReferralStatus, InvestmentStatus } from '../types/index.js';
+import { CustomerFilterParams, UserRole, UserStatus, KycStatus, ReferralStatus, InvestmentStatus, JwtUserPayload } from '../types/index.js';
+import { decryptData } from '../utils/encryption.js';
 import { toPaise, fromPaise } from '../utils/money.js';
 import { maskPan, maskAadhaar, maskBankAccount } from '../utils/mask.js';
 import { NotFoundError, BadRequestError, ConflictError } from '../utils/errors.js';
@@ -110,7 +111,11 @@ export class CustomerService {
   /**
    * Get single customer 360 profile
    */
-  public static async getCustomerById(customerId: number) {
+  public static async getCustomerById(customerId: number, requestingUser?: JwtUserPayload) {
+    // Managers pay customers by hand, so they may see the real bank account number from KYC
+    const canSeeFullAccount = Boolean(
+      requestingUser && [UserRole.SUPER_ADMIN, UserRole.ADMIN].includes(requestingUser.role)
+    );
     const user = await User.findOne({
       where: { id: customerId, role: UserRole.CUSTOMER },
       attributes: ['id', 'email', 'phone', 'role', 'status', 'last_login_at', 'created_at', 'updated_at'],
@@ -179,8 +184,17 @@ export class CustomerService {
             id: k.id,
             status: k.kyc_status,
             panMasked: k.pan_last4 ? maskPan(k.pan_last4) : 'N/A',
+            panNumber:
+              canSeeFullAccount && k.pan_number_encrypted
+                ? decryptData(k.pan_number_encrypted) || null
+                : null,
             aadhaarMasked: k.aadhaar_last4 ? maskAadhaar(k.aadhaar_last4) : 'N/A',
-            bankAccountMasked: k.bank_account_last4 ? maskBankAccount(k.bank_account_last4) : 'N/A',
+            aadhaarNumber: canSeeFullAccount ? k.aadhaar_reference : null,
+            bankAccountMasked: k.bank_account_last4 ? maskBankAccount(`XXXXXXXX${k.bank_account_last4}`) : 'N/A',
+            bankAccountNumber:
+              canSeeFullAccount && k.bank_account_number_encrypted
+                ? decryptData(k.bank_account_number_encrypted) || null
+                : null,
             accountHolderName: k.account_holder_name,
             ifscCode: k.ifsc_code,
             submittedAt: k.submitted_at,
@@ -189,6 +203,20 @@ export class CustomerService {
             hasPassbookDoc: Boolean(k.passbook_document),
             hasPanDoc: Boolean(k.pan_document),
             hasAadhaarDoc: Boolean(k.aadhaar_document),
+            documents: {
+              passbook: {
+                available: Boolean(k.passbook_document),
+                viewUrl: k.passbook_document ? `/admin/kyc/${k.id}/document/passbook` : null,
+              },
+              pan: {
+                available: Boolean(k.pan_document),
+                viewUrl: k.pan_document ? `/admin/kyc/${k.id}/document/pan` : null,
+              },
+              aadhaar: {
+                available: Boolean(k.aadhaar_document),
+                viewUrl: k.aadhaar_document ? `/admin/kyc/${k.id}/document/aadhaar` : null,
+              },
+            },
           }
         : null,
       referrals: {
@@ -236,19 +264,11 @@ export class CustomerService {
       throw new ConflictError('An account with this phone number already exists');
     }
 
-    // Check referrer if provided
-    let referrerUser: User | null = null;
-    if (referralNumber) {
-      const referrerProfile = await CustomerProfile.findOne({
-        where: { referral_code: referralNumber.toUpperCase().trim() },
-      });
-      if (referrerProfile) {
-        referrerUser = await User.findByPk(referrerProfile.user_id);
-      }
-    }
+    // Same rules as self-registration: the code must belong to an active customer
+    const referrerUser = await AuthService.resolveReferrer(referralNumber);
 
-    // Password
-    const finalPassword = password && password.trim().length >= 6 ? password.trim() : 'Moon@123456';
+    // Password: the validator guarantees strength when one is supplied; blank means the default initial password
+    const finalPassword = password ? password : 'Moon@123456';
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(finalPassword, salt);
 

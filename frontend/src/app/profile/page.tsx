@@ -2,7 +2,7 @@
 
 import React, { useCallback, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Building2, CheckCircle2, Eye, EyeOff, KeyRound, LogOut, ShieldCheck, UserRound } from 'lucide-react';
+import { ArrowRight, Building2, Check, CheckCircle2, Copy, Eye, EyeOff, KeyRound, LogOut, ShieldCheck, UserRound } from 'lucide-react';
 import {
   api,
   getErrorMessage,
@@ -14,7 +14,31 @@ import {
 } from '@/lib/api';
 import { notifyAuthChange, useAuth } from '@/lib/useAuth';
 import { useAsyncData } from '@/lib/useAsyncData';
-import { formatDate, formatDateTime, humanize, validateNewPassword } from '@/lib/format';
+import { formatDate, formatDateTime, formatINR, humanize, validateNewPassword } from '@/lib/format';
+import { KycStatusCard } from '@/components/kyc/KycStatusCard';
+
+function CopyCodeButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } catch {
+          // Clipboard blocked: the code is selectable next to the button
+        }
+      }}
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-zinc-200 dark:border-white/10 text-[10px] font-sans font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
+      aria-label={copied ? 'Referral code copied' : 'Copy referral code'}
+    >
+      {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
 import {
   accentButtonClass,
   Alert,
@@ -35,7 +59,6 @@ import {
 
 const sectionClass = `${cardClass} p-6`;
 
-const UPI_PATTERN = /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z][a-zA-Z0-9]{1,64}$/;
 const IFSC_PATTERN = /^[A-Za-z]{4}0[A-Za-z0-9]{6}$/;
 const ACCOUNT_PATTERN = /^[0-9]{8,25}$/;
 
@@ -95,10 +118,12 @@ export default function ProfilePage() {
   const profileFetcher = useCallback(() => api.getProfile(token as string), [token]);
   const kycFetcher = useCallback(() => api.getKycInfo(token as string), [token]);
   const walletFetcher = useCallback(() => api.getWallet(token as string), [token]);
+  const referralsFetcher = useCallback(() => api.getMyReferrals(token as string), [token]);
 
   const profileQuery = useAsyncData(token ? profileFetcher : null);
   const kyc = useAsyncData(token ? kycFetcher : null);
   const wallet = useAsyncData(token ? walletFetcher : null);
+  const referrals = useAsyncData(token ? referralsFetcher : null);
 
   // Latest values returned by successful saves (avoids a refetch flash)
   const [savedProfile, setSavedProfile] = useState<Profile | null>(null);
@@ -156,7 +181,23 @@ export default function ProfilePage() {
             </div>
             <dl className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-zinc-100 dark:divide-white/[0.06] text-xs">
               <div className="p-5"><dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Mobile</dt><dd className="mt-1 font-medium font-mono text-zinc-900 dark:text-zinc-100">{profile.phone || 'Not provided'}</dd></div>
-              <div className="p-5"><dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Referral code</dt><dd className="mt-1 font-mono font-medium text-zinc-900 dark:text-zinc-100">{profile.referralCode || '—'}</dd></div>
+              <div className="p-5">
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Referral code</dt>
+                <dd className="mt-1 font-mono font-medium text-zinc-900 dark:text-zinc-100 flex items-center gap-2 flex-wrap">
+                  <span className="select-all">{profile.referralCode || '—'}</span>
+                  {profile.referralCode && <CopyCodeButton value={profile.referralCode} />}
+                </dd>
+                {referrals.data && (
+                  <dd className="mt-1 text-[11px] text-zinc-500">
+                    {referrals.data.totalReferrals} referred · earned{' '}
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                      {formatINR(referrals.data.totalCommissionEarned)}
+                    </span>
+                    {referrals.data.pendingCommission > 0 && ` · ${formatINR(referrals.data.pendingCommission)} pending`}
+                    {' '}· {referrals.data.commissionPercent}% of every investment they make
+                  </dd>
+                )}
+              </div>
               <div className="p-5"><dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Member since</dt><dd className="mt-1 font-medium text-zinc-900 dark:text-zinc-100">{formatDate(profile.createdAt)}</dd></div>
             </dl>
           </section>
@@ -216,16 +257,14 @@ export default function ProfilePage() {
                 </Link>
               )}
             </div>
-            {kyc.data?.rejectionReason && !kycVerified && (
-              <p className="mt-3 text-xs text-rose-600 dark:text-rose-400">Compliance note: {kyc.data.rejectionReason}</p>
-            )}
+            {kyc.data && <KycStatusCard kyc={kyc.data} />}
           </section>
 
           {/* Payout details */}
-          <section id="payout-details" className={`${sectionClass} scroll-mt-24`} aria-label="Bank and UPI details">
+          <section id="payout-details" className={`${sectionClass} scroll-mt-24`} aria-label="Bank account details">
             <SectionTitle
               icon={<Building2 className="w-5 h-5" />}
-              title="Bank / UPI details"
+              title="Bank account details"
               description="Withdrawals are paid to these details. Make sure they belong to you and are correct."
             />
             <PayoutDetailsForm
@@ -407,20 +446,20 @@ function PayoutDetailsForm({
   defaultHolderName: string;
   onSaved: (details: PayoutDetails) => void;
 }) {
-  const [preferredMethod, setPreferredMethod] = useState<PayoutMethod>(details?.preferredMethod || 'BANK');
-  const [upiId, setUpiId] = useState(details?.upiId || '');
+  // Withdrawals are paid to the bank account only
+  const preferredMethod: PayoutMethod = 'BANK';
   const [accountHolderName, setAccountHolderName] = useState(details?.accountHolderName || defaultHolderName);
   const [accountNumber, setAccountNumber] = useState('');
   const [ifscCode, setIfscCode] = useState(details?.ifscCode || '');
   const [bankName, setBankName] = useState(details?.bankName || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [invalidField, setInvalidField] = useState<'upi' | 'holder' | 'account' | 'ifsc' | null>(null);
+  const [invalidField, setInvalidField] = useState<'holder' | 'account' | 'ifsc' | null>(null);
   const [success, setSuccess] = useState('');
 
   const hasStoredAccount = Boolean(details?.accountNumberMasked);
 
-  const fail = (field: 'upi' | 'holder' | 'account' | 'ifsc', message: string) => {
+  const fail = (field: 'holder' | 'account' | 'ifsc', message: string) => {
     setInvalidField(field);
     setError(message);
   };
@@ -432,21 +471,12 @@ function PayoutDetailsForm({
     setSuccess('');
     setInvalidField(null);
 
-    const cleanUpi = upiId.trim();
     const cleanHolder = accountHolderName.trim();
     const cleanAccount = accountNumber.trim();
     const cleanIfsc = ifscCode.trim().toUpperCase();
     const cleanBank = bankName.trim();
     const bankTouched = Boolean(cleanAccount || cleanIfsc || hasStoredAccount);
 
-    if (cleanUpi && !UPI_PATTERN.test(cleanUpi)) {
-      fail('upi', 'Enter a valid UPI ID (e.g. name@bank).');
-      return;
-    }
-    if (preferredMethod === 'UPI' && !cleanUpi) {
-      fail('upi', 'A UPI ID is required when UPI is your preferred payout method.');
-      return;
-    }
     if (cleanAccount && !ACCOUNT_PATTERN.test(cleanAccount)) {
       fail('account', 'Bank account number must be 8 to 25 digits.');
       return;
@@ -476,7 +506,7 @@ function PayoutDetailsForm({
 
     const input: UpdatePayoutDetailsInput = {
       preferredMethod,
-      upiId: cleanUpi || null,
+      upiId: null,
       accountHolderName: cleanHolder || null,
       ifscCode: cleanIfsc || null,
       bankName: cleanBank || null,
@@ -504,42 +534,12 @@ function PayoutDetailsForm({
 
       {!details && (
         <Alert tone="info">
-          You have not added payout details yet. Add a bank account or UPI ID so you can request withdrawals.
+          You have not added payout details yet. Add your bank account so you can request withdrawals.
         </Alert>
       )}
 
-      <fieldset disabled={saving}>
-        <legend className={labelClass}>Preferred payout method</legend>
-        <div className="grid grid-cols-2 gap-3 max-w-sm">
-          {(['BANK', 'UPI'] as PayoutMethod[]).map((option) => (
-            <label
-              key={option}
-              className={`flex items-center gap-2 p-3 rounded-xl border cursor-pointer text-xs font-semibold transition ${
-                preferredMethod === option
-                  ? 'border-blue-600/40 bg-blue-600/5 dark:bg-blue-600/10 text-zinc-950 dark:text-white'
-                  : 'border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-400'
-              }`}
-            >
-              <input
-                type="radio"
-                name="preferredMethod"
-                value={option}
-                checked={preferredMethod === option}
-                onChange={() => setPreferredMethod(option)}
-              />
-              {option === 'BANK' ? 'Bank transfer' : 'UPI'}
-            </label>
-          ))}
-        </div>
-      </fieldset>
+      <p className={helpTextClass}>Withdrawals are paid to this bank account after admin verification.</p>
 
-      <div>
-        <label htmlFor="payout-upi" className={labelClass}>
-          UPI ID {preferredMethod === 'UPI' && <RequiredMark />}
-        </label>
-        <input id="payout-upi" type="text" autoComplete="off" placeholder="name@bank" value={upiId} onChange={(e) => setUpiId(e.target.value.trim())} disabled={saving} aria-invalid={invalidField === 'upi'} aria-describedby="payout-upi-help" className={`${inputClass} font-mono max-w-sm`} />
-        <p id="payout-upi-help" className={helpTextClass}>Your UPI ID, for example name@okhdfcbank. Required for UPI payouts.</p>
-      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>

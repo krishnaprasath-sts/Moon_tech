@@ -1,6 +1,6 @@
 import { DataTypes, Model, Optional } from 'sequelize';
 import { sequelize } from '../config/database.js';
-import { DepositStatus } from '../types/index.js';
+import { DepositMethod, DepositStatus } from '../types/index.js';
 import { decimalGetter } from '../utils/money.js';
 
 export interface DepositAttributes {
@@ -8,6 +8,9 @@ export interface DepositAttributes {
   reference: string;
   user_id: number;
   amount: number;
+  /** How the customer paid: UPI or bank transfer (NEFT / IMPS / RTGS) */
+  payment_method: DepositMethod;
+  /** UPI transaction ID (UTR) or bank transfer reference number */
   upi_transaction_id: string;
   receipt_file: string;
   status: DepositStatus;
@@ -24,6 +27,7 @@ export interface DepositCreationAttributes
     DepositAttributes,
     | 'id'
     | 'status'
+    | 'payment_method'
     | 'rejection_reason'
     | 'admin_remarks'
     | 'reviewed_by'
@@ -43,6 +47,7 @@ export class Deposit
   declare public reference: string;
   declare public user_id: number;
   declare public amount: number;
+  declare public payment_method: DepositMethod;
   declare public upi_transaction_id: string;
   declare public receipt_file: string;
   declare public status: DepositStatus;
@@ -78,6 +83,11 @@ Deposit.init(
       type: DataTypes.DECIMAL(18, 2),
       allowNull: false,
       get: decimalGetter('amount'),
+    },
+    payment_method: {
+      type: DataTypes.ENUM(...Object.values(DepositMethod)),
+      allowNull: false,
+      defaultValue: DepositMethod.UPI,
     },
     upi_transaction_id: {
       type: DataTypes.STRING(50),

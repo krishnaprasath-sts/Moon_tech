@@ -3,10 +3,9 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Bell, Calculator, LogOut, Moon, Sun, Menu, X, UserRound } from 'lucide-react';
+import { Bell, LogOut, Moon, Sun, Menu, X, UserRound } from 'lucide-react';
 import { Logo } from '../brand/Logo';
 import { useTheme } from '@/context/ThemeContext';
-import { QuickCalculatorModal } from '../calculator/QuickCalculatorModal';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/useAuth';
 
@@ -15,10 +14,12 @@ export const NOTIFICATIONS_CHANGED_EVENT = 'moontech-notifications-changed';
 
 const UNREAD_POLL_INTERVAL_MS = 60_000;
 
+// Visitors see the training company; plan pages appear only after login
 const VISITOR_LINKS = [
-  { label: 'Plans', href: '/plans' },
-  { label: 'Returns Calculator', href: '/calculator' },
-  { label: 'Featured Plans', href: '/offers' },
+  { label: 'Programs', href: '/#programs' },
+  { label: 'How it works', href: '/#how-it-works' },
+  { label: 'Why MoonTech', href: '/#why-us' },
+  { label: 'FAQ', href: '/#faq' },
 ];
 
 const CUSTOMER_LINKS = [
@@ -26,7 +27,7 @@ const CUSTOMER_LINKS = [
   { label: 'Plans', href: '/plans' },
   { label: 'Wallet', href: '/wallet' },
   { label: 'Investments', href: '/investments' },
-  { label: 'Transactions', href: '/transactions' },
+  { label: 'Referrals', href: '/referrals' },
 ];
 
 function useUnreadCount(token: string | null): number {
@@ -69,7 +70,6 @@ export const Navbar: React.FC = () => {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
   const { token, logout } = useAuth({ required: false });
-  const [isCalcOpen, setIsCalcOpen] = useState(false);
   // Remembering the path the menu was opened on closes it automatically on navigation
   const [menu, setMenu] = useState<{ open: boolean; path: string }>({ open: false, path: '' });
   const mobileMenuOpen = menu.open && menu.path === pathname;
@@ -121,7 +121,7 @@ export const Navbar: React.FC = () => {
           <div className="flex items-center justify-between h-16 gap-4">
 
             {/* Custom Brand Logo */}
-            <Logo size="md" />
+            <Logo size="md" className="min-w-0" />
 
             {/* Desktop Navigation Links */}
             <nav className="hidden lg:flex items-center gap-6" aria-label="Main">
@@ -185,7 +185,7 @@ export const Navbar: React.FC = () => {
             </div>
 
             {/* Mobile Actions */}
-            <div className="flex lg:hidden items-center gap-1.5">
+            <div className="flex lg:hidden items-center gap-0.5 sm:gap-1.5 shrink-0">
               <button
                 type="button"
                 onClick={toggleTheme}
@@ -194,18 +194,7 @@ export const Navbar: React.FC = () => {
               >
                 {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-zinc-700" />}
               </button>
-              {isAuthenticated ? (
-                bell
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setIsCalcOpen(true)}
-                  aria-label="Open returns calculator"
-                  className="p-2 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer"
-                >
-                  <Calculator className="w-4 h-4" />
-                </button>
-              )}
+              {isAuthenticated && bell}
               <button
                 type="button"
                 onClick={() => setMenu(mobileMenuOpen ? { open: false, path: '' } : { open: true, path: pathname })}
@@ -283,8 +272,6 @@ export const Navbar: React.FC = () => {
         )}
       </header>
 
-      {/* Quick Calculator Modal */}
-      <QuickCalculatorModal isOpen={isCalcOpen} onClose={() => setIsCalcOpen(false)} />
     </>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Eye, Plus, ShieldCheck } from 'lucide-react';
 import { useKycList, useDebouncedValue } from '../hooks';
 import { KycStatusBadge } from '../components/KycStatusBadge';
@@ -17,9 +17,11 @@ import { btnPrimaryClass, btnRowClass, filterCardClass, tableCardClass, theadCla
 import { formatDateTime, getApiErrorMessage } from '../utils/finance';
 
 export const KycQueuePage: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlTab = searchParams.get('tab') || searchParams.get('status');
   const [page, setPage] = useState(1);
-  // Default to the pending queue so verified / rejected applications do not crowd the active work
-  const [activeTab, setActiveTab] = useState<string>(KycStatus.PENDING);
+  // Default to the pending queue unless a tab query is present in the URL
+  const [activeTab, setActiveTab] = useState<string>(urlTab || KycStatus.PENDING);
   const [search, setSearch] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -28,10 +30,13 @@ export const KycQueuePage: React.FC = () => {
 
   const { isAdmin } = useAuth();
 
+  // When searching by customer name/email/phone, search across all applications if on default queue
+  const statusFilter = debouncedSearch && activeTab === KycStatus.PENDING ? undefined : (activeTab === 'ALL' ? undefined : activeTab);
+
   const { data, isLoading, isError, error, refetch, isFetching } = useKycList({
     page,
     limit: 10,
-    status: activeTab === 'ALL' ? undefined : activeTab,
+    status: statusFilter,
     search: debouncedSearch || undefined,
     startDate: startDate || undefined,
     endDate: endDate || undefined,
@@ -81,6 +86,12 @@ export const KycQueuePage: React.FC = () => {
         onChange={(id) => {
           setActiveTab(id);
           setPage(1);
+          setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            if (id === KycStatus.PENDING) next.delete('tab');
+            else next.set('tab', id);
+            return next;
+          });
         }}
       />
 

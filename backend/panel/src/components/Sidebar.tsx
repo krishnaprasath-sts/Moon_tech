@@ -29,6 +29,8 @@ interface NavItem {
 }
 
 interface NavGroup {
+  /** Hidden from EDITOR (view-only) staff */
+  managersOnly?: boolean;
   label: string;
   items: NavItem[];
 }
@@ -58,6 +60,8 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: 'Administration',
+    // Managers only: editors are view-only staff
+    managersOnly: true,
     items: [{ name: 'Settings & Staff', path: '/settings', icon: Settings }],
   },
 ];
@@ -116,7 +120,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({ i
 
         {/* Navigation */}
         <nav className="flex-1 px-4 py-5 space-y-5 overflow-y-auto">
-          {NAV_GROUPS.map((group) => (
+          {NAV_GROUPS.filter((group) => !(group.managersOnly && isEditor)).map((group) => (
             <div key={group.label}>
               <p className="px-3 pb-2 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{group.label}</p>
               <div className="space-y-1">

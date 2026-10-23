@@ -16,10 +16,8 @@ const fieldClass =
 const submitClass =
   'w-full py-2.5 rounded-xl bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 hover:opacity-90 disabled:opacity-50 text-xs font-semibold transition active:scale-98 shadow-sm flex items-center justify-center gap-1 mt-2';
 
-function isValidIdentifier(value: string): boolean {
-  const clean = value.trim();
-  if (clean.includes('@')) return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean);
-  return /^[0-9+ -]{10,15}$/.test(clean);
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
 export default function ForgotPasswordPage() {
@@ -27,7 +25,7 @@ export default function ForgotPasswordPage() {
   const { theme, toggleTheme } = useTheme();
 
   const [step, setStep] = useState<'request' | 'reset'>('request');
-  const [identifier, setIdentifier] = useState('');
+  const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -43,19 +41,19 @@ export default function ForgotPasswordPage() {
     setError('');
     setNotice('');
 
-    if (!isValidIdentifier(identifier)) {
-      setError('Enter the email address or mobile number registered on your account.');
+    if (!isValidEmail(email)) {
+      setError('Enter the email address registered on your account.');
       return;
     }
 
     setLoading(true);
     try {
-      const result = await api.forgotPassword(identifier);
+      const result = await api.forgotPassword(email);
       setExpiresInMinutes(result.expiresInMinutes);
       setOtp('');
       setStep('reset');
       setNotice(
-        `If an account exists for ${identifier.trim()}, a 6-digit code has been sent to its registered email. The code is valid for ${result.expiresInMinutes} minutes.`
+        `If an account exists for ${email.trim()}, a 6-digit code has been sent to that email address. The code is valid for ${result.expiresInMinutes} minutes.`
       );
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Unable to send the reset code. Please try again.'));
@@ -90,9 +88,8 @@ export default function ForgotPasswordPage() {
 
     setLoading(true);
     try {
-      await api.resetPassword(identifier, otp, newPassword);
-      const prefill = identifier.includes('@') ? `&email=${encodeURIComponent(identifier.trim())}` : '';
-      router.push(`/login?reset=true${prefill}`);
+      await api.resetPassword(email, otp, newPassword);
+      router.push(`/login?reset=true&email=${encodeURIComponent(email.trim().toLowerCase())}`);
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Unable to reset your password. Please try again.'));
       setLoading(false);
@@ -130,7 +127,7 @@ export default function ForgotPasswordPage() {
             </h1>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
               {step === 'request'
-                ? 'Enter your registered email or mobile number and we will email you a reset code.'
+                ? 'Enter the email address registered on your account and we will email you a reset code.'
                 : 'Enter the code we emailed you and choose a new password.'}
             </p>
           </div>
@@ -152,16 +149,17 @@ export default function ForgotPasswordPage() {
           {step === 'request' ? (
             <form onSubmit={handleRequest} className="space-y-4" noValidate>
               <div>
-                <label htmlFor="identifier" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-                  Email Address or Mobile
+                <label htmlFor="email" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
+                  Email address
                 </label>
                 <input
-                  id="identifier"
-                  type="text"
-                  autoComplete="username"
+                  id="email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
                   placeholder="name@example.com"
-                  value={identifier}
-                  onChange={(e) => setIdentifier(e.target.value)}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   disabled={loading}
                   className={fieldClass}
                 />
@@ -266,7 +264,7 @@ export default function ForgotPasswordPage() {
                   }}
                   className="hover:text-zinc-800 dark:hover:text-white transition disabled:opacity-50"
                 >
-                  Use a different email or mobile
+                  Use a different email
                 </button>
                 <button
                   type="button"

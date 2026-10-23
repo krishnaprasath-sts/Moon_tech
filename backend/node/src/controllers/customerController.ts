@@ -47,7 +47,7 @@ export class CustomerController {
         throw new BadRequestError('Invalid Customer ID');
       }
 
-      const result = await CustomerService.getCustomerById(customerId);
+      const result = await CustomerService.getCustomerById(customerId, req.user);
 
       sendResponse({
         res,

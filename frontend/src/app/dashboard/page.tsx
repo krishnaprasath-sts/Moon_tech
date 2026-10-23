@@ -134,8 +134,8 @@ function DashboardContent() {
   const stats = summary
     ? [
         {
-          label: 'Wallet balance',
-          value: formatINR(summary.balance),
+          label: 'Capital wallet',
+          value: formatINR(summary.capitalBalance),
           icon: <Wallet className="w-4 h-4 text-blue-600" />,
           footer: 'Available to invest',
           href: '/wallet',
@@ -143,40 +143,46 @@ function DashboardContent() {
           profit: false,
         },
         {
-          label: 'Invested amount',
-          value: formatINR(summary.investedAmount),
+          label: 'Invested capital',
+          value: formatINR(summary.investedCapital),
           icon: <PiggyBank className="w-4 h-4 text-blue-600" />,
-          footer: `${summary.activeInvestments} active investment${summary.activeInvestments === 1 ? '' : 's'}`,
+          footer: `${summary.activeInvestments} active investment${summary.activeInvestments === 1 ? '' : 's'} earning daily`,
           href: '/investments?status=ACTIVE',
           linkLabel: 'View',
           profit: false,
         },
         {
-          label: 'Expected profit',
-          value: `+${formatINR(summary.expectedProfit)}`,
+          label: 'Profit wallet',
+          value: `+${formatINR(summary.profitBalance)}`,
           icon: <TrendingUp className="w-4 h-4 text-emerald-500" />,
-          footer: 'On active investments, at maturity',
-          href: undefined,
-          linkLabel: '',
+          footer:
+            summary.profitCreditedToday > 0
+              ? `${formatINR(summary.profitCreditedToday)} credited today · ${formatINR(summary.profitCreditedThisMonth)} this month`
+              : `${formatINR(summary.profitCreditedThisMonth)} this month · Mon–Fri 6:00 AM`,
+          href: '/wallet',
+          linkLabel: 'Withdraw',
           profit: true,
         },
         {
           label: 'Profit earned',
           value: `+${formatINR(summary.totalProfitEarned)}`,
           icon: <Banknote className="w-4 h-4 text-emerald-500" />,
-          footer: `Total withdrawn ${formatINR(summary.totalWithdrawn)}`,
-          href: '/investments?tab=withdrawals',
-          linkLabel: 'Withdrawals',
+          footer:
+            summary.referralEarnings > 0
+              ? `+ ${formatINR(summary.referralEarnings)} referral commission · withdrawn ${formatINR(summary.totalWithdrawn)}`
+              : `Total withdrawn ${formatINR(summary.totalWithdrawn)}`,
+          href: '/wallet?tab=transactions',
+          linkLabel: 'History',
           profit: true,
         },
       ]
     : [];
 
   const quickActions = [
-    { label: 'Add money', description: 'Top up by UPI', href: '/wallet', icon: <Plus className="w-4 h-4" /> },
+    { label: 'Add money', description: 'Top up by bank transfer', href: '/wallet', icon: <Plus className="w-4 h-4" /> },
     { label: 'Invest', description: 'Browse plans', href: '/plans', icon: <TrendingUp className="w-4 h-4" /> },
     { label: 'My investments', description: 'Track maturity', href: '/investments', icon: <PiggyBank className="w-4 h-4" /> },
-    { label: 'Transactions', description: 'Full history', href: '/transactions', icon: <Receipt className="w-4 h-4" /> },
+    { label: 'Transactions', description: 'Full history', href: '/wallet?tab=transactions', icon: <Receipt className="w-4 h-4" /> },
   ];
 
   return (
@@ -377,8 +383,8 @@ function DashboardContent() {
                 >
                   {stat.value}
                 </div>
-                <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-white/[0.04] flex items-center justify-between gap-3 text-xs">
-                  <span className="text-zinc-500">{stat.footer}</span>
+                <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-white/[0.04] flex items-start justify-between gap-3 text-xs">
+                  <span className="text-zinc-500 leading-snug">{stat.footer}</span>
                   {stat.href && (
                     <Link href={stat.href} className="text-blue-600 dark:text-blue-400 hover:underline font-medium flex items-center gap-0.5 shrink-0">
                       {stat.linkLabel} <ArrowRight className="w-3 h-3" />
@@ -438,7 +444,34 @@ function DashboardContent() {
             }
           />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          <ul className="md:hidden divide-y divide-zinc-100 dark:divide-white/[0.04]">
+            {investments.data.items.map((investment) => (
+              <li key={investment.id} className="p-4 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">{investment.planName}</div>
+                    <div className="text-[10px] font-mono text-zinc-500 truncate">{investment.reference}</div>
+                  </div>
+                  <StatusBadge status={investment.status} kind="investment" />
+                </div>
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                  <dt className="text-zinc-500">Invested</dt>
+                  <dd className="text-right tabular-nums text-zinc-900 dark:text-zinc-200">{formatINR(investment.amount)}</dd>
+                  <dt className="text-zinc-500">Maturity amount</dt>
+                  <dd className="text-right tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{formatINR(investment.maturityAmount)}</dd>
+                  <dt className="text-zinc-500">Maturity</dt>
+                  <dd className="text-right text-zinc-700 dark:text-zinc-300">
+                    {formatDate(investment.maturityDate)}
+                    {investment.status === 'ACTIVE' && (
+                      <span className="text-zinc-400"> · {Math.max(0, Number(investment.daysRemaining) || 0)}d left</span>
+                    )}
+                  </dd>
+                </dl>
+              </li>
+            ))}
+          </ul>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-zinc-50 dark:bg-zinc-900/40 text-zinc-500 dark:text-zinc-400 font-medium border-b border-zinc-100 dark:border-white/[0.04]">
                 <tr>
@@ -473,6 +506,7 @@ function DashboardContent() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 
@@ -482,7 +516,7 @@ function DashboardContent() {
           icon={<Receipt />}
           title="Recent transactions"
           action={
-            <Link href="/transactions" className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline font-medium">
+            <Link href="/wallet?tab=transactions" className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline font-medium">
               View all
             </Link>
           }

@@ -1,6 +1,6 @@
 import { DataTypes, Model, Optional } from 'sequelize';
 import { sequelize } from '../config/database.js';
-import { WalletTxnType, WalletTxnDirection } from '../types/index.js';
+import { WalletTxnType, WalletTxnDirection, WalletBucket } from '../types/index.js';
 import { decimalGetter } from '../utils/money.js';
 
 export interface WalletTransactionAttributes {
@@ -10,6 +10,8 @@ export interface WalletTransactionAttributes {
   wallet_id: number;
   type: WalletTxnType;
   direction: WalletTxnDirection;
+  /** Which balance this entry moved; balance_before/after refer to that bucket */
+  bucket: WalletBucket;
   amount: number;
   balance_before: number;
   balance_after: number;
@@ -39,6 +41,7 @@ export class WalletTransaction
   declare public wallet_id: number;
   declare public type: WalletTxnType;
   declare public direction: WalletTxnDirection;
+  declare public bucket: WalletBucket;
   declare public amount: number;
   declare public balance_before: number;
   declare public balance_after: number;
@@ -85,6 +88,11 @@ WalletTransaction.init(
       type: DataTypes.ENUM(...Object.values(WalletTxnDirection)),
       allowNull: false,
     },
+    bucket: {
+      type: DataTypes.ENUM(...Object.values(WalletBucket)),
+      allowNull: false,
+      defaultValue: WalletBucket.PROFIT,
+    },
     amount: {
       type: DataTypes.DECIMAL(18, 2),
       allowNull: false,
@@ -128,6 +136,7 @@ WalletTransaction.init(
       { fields: ['user_id'] },
       { fields: ['wallet_id'] },
       { fields: ['type'] },
+      { fields: ['bucket'] },
       { fields: ['created_at'] },
       { fields: ['related_entity', 'related_id'] },
     ],

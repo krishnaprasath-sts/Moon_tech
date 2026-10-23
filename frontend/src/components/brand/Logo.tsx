@@ -47,8 +47,8 @@ export const Logo: React.FC<LogoProps> = ({ className = '', size = 'md', without
           <span className={`font-bold tracking-tight text-zinc-950 dark:text-white transition-colors ${textSizes[size]}`}>
             MoonTech
           </span>
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20">
-            Invest
+          <span className="hidden min-[400px]:inline-flex text-[10px] font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20">
+            Solutions
           </span>
         </div>
       </div>

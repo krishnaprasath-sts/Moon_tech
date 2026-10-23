@@ -2,16 +2,27 @@ import { DataTypes, Model, Optional } from 'sequelize';
 import { sequelize } from '../config/database.js';
 import { decimalGetter } from '../utils/money.js';
 
+/**
+ * A customer's wallet, split into two buckets (see WalletBucket):
+ * - capital_balance: deposited money not yet invested + principal returned at maturity
+ * - profit_balance:  daily profit and referral commission, withdrawable any time
+ * `balance` is always capital_balance + profit_balance and is kept for reports.
+ */
 export interface WalletAttributes {
   id: number;
   user_id: number;
   balance: number;
+  capital_balance: number;
+  profit_balance: number;
   created_at?: Date;
   updated_at?: Date;
 }
 
 export interface WalletCreationAttributes
-  extends Optional<WalletAttributes, 'id' | 'balance' | 'created_at' | 'updated_at'> {}
+  extends Optional<
+    WalletAttributes,
+    'id' | 'balance' | 'capital_balance' | 'profit_balance' | 'created_at' | 'updated_at'
+  > {}
 
 export class Wallet
   extends Model<WalletAttributes, WalletCreationAttributes>
@@ -20,6 +31,8 @@ export class Wallet
   declare public id: number;
   declare public user_id: number;
   declare public balance: number;
+  declare public capital_balance: number;
+  declare public profit_balance: number;
   declare public readonly created_at: Date;
   declare public readonly updated_at: Date;
 }
@@ -45,6 +58,18 @@ Wallet.init(
       allowNull: false,
       defaultValue: 0,
       get: decimalGetter('balance'),
+    },
+    capital_balance: {
+      type: DataTypes.DECIMAL(18, 2),
+      allowNull: false,
+      defaultValue: 0,
+      get: decimalGetter('capital_balance'),
+    },
+    profit_balance: {
+      type: DataTypes.DECIMAL(18, 2),
+      allowNull: false,
+      defaultValue: 0,
+      get: decimalGetter('profit_balance'),
     },
   },
   {

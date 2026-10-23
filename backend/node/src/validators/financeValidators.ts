@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { ProfitType, PayoutMethod, WalletTxnDirection } from '../types/index.js';
+import {
+  ProfitType,
+  ProfitPayoutMode,
+  PayoutMethod,
+  WalletTxnDirection,
+  DepositMethod,
+  RateBasis,
+  WalletBucket,
+} from '../types/index.js';
 import { MAX_MONEY } from '../utils/money.js';
 
 const hasMaxTwoDecimals = (value: number) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-6;
@@ -31,7 +39,38 @@ export const updateSettingsSchema = z
       .optional(),
     upiPayeeName: z.string().trim().min(2, 'Payee name must be at least 2 characters').max(100).optional(),
     depositInstructions: z.string().trim().min(5).max(1000).optional(),
+    // Bank transfer destination; empty strings clear the fields
+    bankAccountName: z.string().trim().max(100).optional(),
+    bankAccountNumber: z
+      .string()
+      .trim()
+      .regex(/^(|[0-9]{9,18})$/, 'Account number must be 9-18 digits')
+      .optional(),
+    bankIfsc: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^(|[A-Z]{4}0[A-Z0-9]{6})$/, 'Invalid IFSC code (e.g. SBIN0001234)')
+      .optional(),
+    bankName: z.string().trim().max(100).optional(),
+    bankTransferInstructions: z.string().trim().min(5).max(1000).optional(),
     requireKycForInvestment: z.boolean().optional(),
+    requireKycForWithdrawal: z.boolean().optional(),
+    walletMinWithdrawal: moneySchema('Minimum wallet withdrawal').optional(),
+    referralCommissionPercent: z.coerce
+      .number({ invalid_type_error: 'Referral commission must be a number' })
+      .finite()
+      .min(0, 'Referral commission cannot be negative')
+      .max(100, 'Referral commission cannot exceed 100%')
+      .refine(hasMaxTwoDecimals, 'Referral commission supports a maximum of 2 decimal places')
+      .optional(),
+    capitalWithdrawalFeePercent: z.coerce
+      .number({ invalid_type_error: 'Capital withdrawal fee must be a number' })
+      .finite()
+      .min(0, 'Capital withdrawal fee cannot be negative')
+      .max(100, 'Capital withdrawal fee cannot exceed 100%')
+      .refine(hasMaxTwoDecimals, 'Capital withdrawal fee supports a maximum of 2 decimal places')
+      .optional(),
   })
   .refine((value) => Object.keys(value).length > 0, 'At least one setting must be provided');
 
@@ -40,10 +79,17 @@ export const updateSettingsSchema = z
 // ---------------------------------------------------------------------------
 export const createDepositSchema = z.object({
   amount: moneySchema('Amount'),
+  // Only bank transfers (NEFT / IMPS / RTGS) are accepted; UPI is kept in the enum for old records
+  paymentMethod: z
+    .nativeEnum(DepositMethod)
+    .optional()
+    .default(DepositMethod.BANK_TRANSFER)
+    .refine((m): boolean => m === DepositMethod.BANK_TRANSFER, 'UPI payments are not accepted. Please pay by bank transfer.'),
+  // Bank transfer reference number (UTR / RRN)
   upiTransactionId: z
     .string()
     .trim()
-    .regex(/^[A-Za-z0-9]{8,35}$/, 'UPI transaction ID must be 8-35 letters/digits without spaces')
+    .regex(/^[A-Za-z0-9]{8,35}$/, 'Transaction reference must be 8-35 letters/digits without spaces')
     .transform((value) => value.toUpperCase()),
 });
 
@@ -64,13 +110,26 @@ const planFields = {
   description: optionalText(2000),
   minAmount: moneySchema('Minimum investment'),
   maxAmount: moneySchema('Maximum investment'),
+  // 0 = open-ended: runs until the customer withdraws the capital (daily-profit plans only)
   durationDays: z.coerce
     .number()
     .int('Investment period must be a whole number of days')
-    .min(1, 'Investment period must be at least 1 day')
+    .min(0, 'Investment period cannot be negative')
     .max(3650, 'Investment period cannot exceed 3650 days'),
+  lockInDays: z.coerce
+    .number()
+    .int('Lock-in period must be a whole number of days')
+    .min(0, 'Lock-in period cannot be negative')
+    .max(3650, 'Lock-in period cannot exceed 3650 days')
+    .optional(),
   profitType: z.nativeEnum(ProfitType, { errorMap: () => ({ message: 'Profit type must be PERCENTAGE or FIXED' }) }),
   profitValue: moneySchema('Profit value'),
+  payoutMode: z
+    .nativeEnum(ProfitPayoutMode, { errorMap: () => ({ message: 'Payout mode must be AT_MATURITY or DAILY' }) })
+    .optional(),
+  rateBasis: z
+    .nativeEnum(RateBasis, { errorMap: () => ({ message: 'Rate basis must be PER_MONTH, PER_YEAR or PER_DAY' }) })
+    .optional(),
   isActive: z.boolean().optional(),
   isFeatured: z.boolean().optional(),
   featuredTagline: optionalText(160),
@@ -86,8 +145,11 @@ export const updateInvestmentPlanSchema = z
     minAmount: planFields.minAmount.optional(),
     maxAmount: planFields.maxAmount.optional(),
     durationDays: planFields.durationDays.optional(),
+    lockInDays: planFields.lockInDays,
     profitType: planFields.profitType.optional(),
     profitValue: planFields.profitValue.optional(),
+    payoutMode: planFields.payoutMode,
+    rateBasis: planFields.rateBasis,
     isActive: planFields.isActive,
     isFeatured: planFields.isFeatured,
     featuredTagline: planFields.featuredTagline,
@@ -110,6 +172,11 @@ export const planFeaturedSchema = z.object({
 export const investSchema = z.object({
   planId: z.coerce.number().int().positive('Valid planId is required'),
   amount: moneySchema('Investment amount'),
+  // Which wallet balance pays for the investment. Profit that is re-invested becomes capital.
+  source: z
+    .nativeEnum(WalletBucket, { errorMap: () => ({ message: 'Source must be CAPITAL or PROFIT' }) })
+    .optional()
+    .default(WalletBucket.CAPITAL),
 });
 
 export const cancelInvestmentSchema = z.object({
@@ -126,6 +193,22 @@ export const earlyWithdrawalSchema = z.object({
 export const requestWithdrawalSchema = z.object({
   payoutMethod: z.nativeEnum(PayoutMethod).optional(),
 });
+
+export const walletWithdrawalSchema = z
+  .object({
+    // PROFIT: any amount, no fee. CAPITAL: the whole available capital balance, less the fee.
+    bucket: z
+      .nativeEnum(WalletBucket, { errorMap: () => ({ message: 'Bucket must be CAPITAL or PROFIT' }) })
+      .optional()
+      .default(WalletBucket.PROFIT),
+    amount: moneySchema('Withdrawal amount').optional(),
+    payoutMethod: z.nativeEnum(PayoutMethod).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.bucket === WalletBucket.PROFIT && value.amount === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['amount'], message: 'Withdrawal amount is required' });
+    }
+  });
 
 export const approveWithdrawalSchema = z.object({
   remarks: optionalText(1000),
@@ -155,6 +238,10 @@ export const walletAdjustmentSchema = z.object({
   direction: z.nativeEnum(WalletTxnDirection, {
     errorMap: () => ({ message: 'Direction must be CREDIT or DEBIT' }),
   }),
+  bucket: z
+    .nativeEnum(WalletBucket, { errorMap: () => ({ message: 'Bucket must be CAPITAL or PROFIT' }) })
+    .optional()
+    .default(WalletBucket.PROFIT),
   amount: moneySchema('Adjustment amount'),
   reason: z.string().trim().min(5, 'Reason must be at least 5 characters').max(500),
 });
@@ -188,9 +275,12 @@ export const updateProfileSchema = z
 
 export const updatePayoutDetailsSchema = z
   .object({
-    preferredMethod: z.nativeEnum(PayoutMethod, {
-      errorMap: () => ({ message: 'Preferred method must be BANK or UPI' }),
-    }),
+    // Payouts go to a bank account only; UPI stays in the enum for old records
+    preferredMethod: z
+      .nativeEnum(PayoutMethod, {
+        errorMap: () => ({ message: 'Preferred method must be BANK' }),
+      })
+      .refine((m): boolean => m === PayoutMethod.BANK, 'Withdrawals are paid to your bank account only.'),
     upiId: z
       .string()
       .trim()
@@ -239,12 +329,21 @@ export const changePasswordSchema = z
     path: ['newPassword'],
   });
 
+// Password resets are email-only: the code is delivered to the registered email address
+const resetEmailField = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(1, 'Email address is required')
+  .max(255)
+  .email('Enter a valid email address');
+
 export const forgotPasswordSchema = z.object({
-  identifier: z.string().trim().min(3, 'Email or mobile number is required').max(255),
+  email: resetEmailField,
 });
 
 export const resetPasswordSchema = z.object({
-  identifier: z.string().trim().min(3, 'Email or mobile number is required').max(255),
+  email: resetEmailField,
   otp: z.string().trim().regex(/^[0-9]{6}$/, 'OTP must be 6 digits'),
   newPassword: newPasswordSchema,
 });
@@ -263,6 +362,7 @@ export type CreateInvestmentPlanInput = z.infer<typeof createInvestmentPlanSchem
 export type UpdateInvestmentPlanInput = z.infer<typeof updateInvestmentPlanSchema>;
 export type InvestInput = z.infer<typeof investSchema>;
 export type RequestWithdrawalInput = z.infer<typeof requestWithdrawalSchema>;
+export type WalletWithdrawalInput = z.infer<typeof walletWithdrawalSchema>;
 export type ApproveWithdrawalInput = z.infer<typeof approveWithdrawalSchema>;
 export type CompleteWithdrawalInput = z.infer<typeof completeWithdrawalSchema>;
 export type WalletAdjustmentInput = z.infer<typeof walletAdjustmentSchema>;

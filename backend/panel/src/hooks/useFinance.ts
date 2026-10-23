@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient, QueryClient } from '@tanstack/react-query';
 import {
   financeApi,
+  payoutApi,
   FinanceListParams,
   InvestmentListParams,
   WalletLedgerParams,
@@ -28,6 +29,30 @@ const invalidateFinance = (queryClient: QueryClient, keys: string[]) => {
     'customers',
     'activity-logs',
   ]);
+};
+
+// ---------------------------------------------------------------------------
+// Payout job (daily profit + referral commission)
+// ---------------------------------------------------------------------------
+export const usePayoutStatus = () => {
+  return useQuery({
+    queryKey: ['payout-status'],
+    queryFn: async () => {
+      const res = await payoutApi.getStatus();
+      return res.data;
+    },
+  });
+};
+
+export const useRunPayouts = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await payoutApi.run();
+      return res;
+    },
+    onSuccess: () => invalidateFinance(queryClient, ['payout-status', 'admin-investments', 'referral-commissions', 'referrals']),
+  });
 };
 
 // ---------------------------------------------------------------------------
@@ -87,6 +112,26 @@ export const useUpdatePlatformSettings = () => {
     mutationFn: async (data: Partial<PlatformSettings>) => {
       return await financeApi.updateSettings(data);
     },
+    onSuccess: () => {
+      invalidateKeys(queryClient, ['platform-settings', 'activity-logs']);
+    },
+  });
+};
+
+export const useUploadUpiQr = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File) => await financeApi.uploadUpiQr(file),
+    onSuccess: () => {
+      invalidateKeys(queryClient, ['platform-settings', 'activity-logs']);
+    },
+  });
+};
+
+export const useRemoveUpiQr = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => await financeApi.removeUpiQr(),
     onSuccess: () => {
       invalidateKeys(queryClient, ['platform-settings', 'activity-logs']);
     },

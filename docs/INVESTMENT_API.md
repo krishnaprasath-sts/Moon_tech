@@ -61,8 +61,9 @@ When updating payout details, omit `accountNumber` to keep the stored one. BANK 
 ### Wallet
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/wallet` | summary + top-up config |
-| GET | `/wallet/transactions` | filters: `type`, `direction`, `startDate`, `endDate` |
+| GET | `/wallet` | summary (two buckets: capital + profit) + config |
+| GET | `/wallet/transactions` | filters: `type`, `direction`, `bucket` (`CAPITAL`\|`PROFIT`), `startDate`, `endDate` |
+| POST | `/wallet/withdrawals` | `{ bucket?: "PROFIT"\|"CAPITAL" (default PROFIT), amount?, payoutMethod? }`. PROFIT: `amount` required, no fee. CAPITAL: whole available capital balance, `amount` ignored, fee deducted |
 | GET | `/wallet/deposits` | filters: `status`, `startDate`, `endDate` |
 | POST | `/wallet/deposits` | **multipart**: `amount`, `upiTransactionId` (8-35 letters/digits), file field `receipt` (JPEG/PNG/WEBP/PDF ≤ 5 MB, required) |
 | GET | `/wallet/deposits/:id/receipt` | streams the file (send the Bearer token; fetch as blob) |
@@ -70,26 +71,36 @@ When updating payout details, omit `accountNumber` to keep the stored one. BANK 
 `GET /wallet` →
 ```json
 {
-  "balance": 12000, "pendingDepositAmount": 5000, "pendingDepositCount": 1,
-  "totalDeposited": 20000, "investedAmount": 8000, "expectedProfit": 800,
-  "totalProfitEarned": 0, "totalWithdrawn": 0,
+  "balance": 103200, "capitalBalance": 100000, "profitBalance": 3200, "investedCapital": 100000,
+  "pendingDepositAmount": 5000, "pendingDepositCount": 1,
+  "totalDeposited": 200000, "investedAmount": 100000, "expectedProfit": 0,
+  "totalProfitEarned": 3200, "dailyProfitCredited": 3200, "profitCreditedToday": 250, "profitCreditedThisMonth": 2000,
+  "lastProfitCreditDay": "2026-10-14", "referralEarnings": 0, "referralEarningsPending": 0,
+  "totalWithdrawn": 0, "totalFeesPaid": 0,
   "activeInvestments": 1, "maturedInvestments": 0, "pendingWithdrawals": 0,
+  "pendingWithdrawalAmount": 0, "pendingCapitalWithdrawalAmount": 0, "pendingProfitWithdrawalAmount": 0,
   "config": {
     "minTopup": 500, "maxTopup": 200000, "upiId": "moontech@upi", "upiPayeeName": "Moon Tech Solutions",
-    "depositInstructions": "...", "requireKycForInvestment": false
+    "depositInstructions": "...", "requireKycForInvestment": true, "requireKycForWithdrawal": true,
+    "minWithdrawal": 500, "referralCommissionPercent": 0.5, "capitalWithdrawalFeePercent": 5,
+    "payoutSchedule": "Every working day (Monday to Friday) at 6:00 AM IST"
   }
 }
 ```
+`balance` is always `capitalBalance + profitBalance`. **Capital wallet**: deposits and capital returned at maturity;
+it is what gets invested and the only money that earns. **Profit wallet**: daily profit and referral commission;
+withdrawable any time without fee, never earns by itself (no compounding) unless re-invested.
 
 Transaction →
 ```json
 {
   "id": 1, "reference": "TXN-20260928-9F3A1C7B2D",
-  "type": "DEPOSIT|INVESTMENT|MATURITY_PRINCIPAL|PROFIT|WITHDRAWAL|REFUND|ADJUSTMENT",
-  "direction": "CREDIT|DEBIT", "amount": 5000, "balanceBefore": 0, "balanceAfter": 5000,
+  "type": "DEPOSIT|INVESTMENT|MATURITY_PRINCIPAL|PROFIT|REFERRAL_COMMISSION|WITHDRAWAL|REFUND|ADJUSTMENT",
+  "direction": "CREDIT|DEBIT", "bucket": "CAPITAL|PROFIT", "amount": 5000, "balanceBefore": 0, "balanceAfter": 5000,
   "relatedEntity": "DEPOSIT", "relatedId": 3, "description": "...", "status": "COMPLETED", "createdAt": "..."
 }
 ```
+`balanceBefore` / `balanceAfter` are the balances of the `bucket` that moved.
 
 Deposit →
 ```json
@@ -105,48 +116,66 @@ Deposit →
 |---|---|---|
 | GET | `/investment-plans` | public; active plans only |
 | GET | `/investment-plans/featured` | public; active plans the admin marked as featured, in `sortOrder` |
-| POST | `/investments/preview` | `{ planId, amount }` – auth |
-| POST | `/investments` | `{ planId, amount }` – debits the wallet |
+| POST | `/investments/preview` | `{ planId, amount, source?: "CAPITAL"\|"PROFIT" }` – auth |
+| POST | `/investments` | `{ planId, amount, source? }` – debits the chosen wallet (default CAPITAL; re-invested profit becomes capital) |
 | GET | `/investments` | filters: `status`, `planId` |
-| GET | `/investments/:id` | adds `withdrawals: [{ id, reference, totalAmount, status, rejectionReason, createdAt, completedAt }]` |
-| POST | `/investments/:id/withdraw` | `{ payoutMethod?: "BANK"\|"UPI" }` (defaults to preferred) |
+| GET | `/investments/:id` | adds `profitCredits[]` and `withdrawals: [{ id, reference, principalAmount, profitAmount, totalAmount, feePercent, feeAmount, netAmount, status, isEarly, rejectionReason, createdAt, completedAt }]` |
+| POST | `/investments/:id/withdraw` | closes the investment and withdraws its capital, less the fee. `{ payoutMethod?: "BANK"\|"UPI" }`. 403 while the lock-in runs (unless the admin allowed an early exit) |
 
 Plan →
 ```json
 {
-  "id": 1, "name": "Growth 90", "description": "...", "minAmount": 5000, "maxAmount": 200000,
-  "durationDays": 90, "profitType": "PERCENTAGE|FIXED", "profitValue": 10,
-  "isActive": true, "isFeatured": true, "featuredTagline": "Our most popular plan", "sortOrder": 2,
+  "id": 1, "name": "Regular Plan", "description": "...", "minAmount": 1000, "maxAmount": 500000,
+  "durationDays": 0, "isOpenEnded": true, "lockInDays": 0,
+  "profitType": "PERCENTAGE", "profitValue": 5, "payoutMode": "DAILY", "rateBasis": "PER_MONTH",
+  "creditsPerMonth": 20, "creditsPerWeek": 5,
+  "isActive": true, "isFeatured": true, "featuredTagline": "5% monthly profit, credited every working day. No lock-in.", "sortOrder": 0,
   "createdAt": "...", "updatedAt": "..."
 }
 ```
 `isFeatured` / `featuredTagline` control the website's Featured Plans page.
-`PERCENTAGE`: `profitValue` is the % of principal earned over the whole period.
-`FIXED`: `profitValue` is a rupee amount.
+`payoutMode: "DAILY"` + `rateBasis: "PER_MONTH"`: `profitValue` is the % of the invested capital **per month**, paid as
+20 equal working-day credits (4 weeks × 5 days). `PER_YEAR`: per year, 240 credits. `PER_DAY`: legacy, the % every working day.
+`durationDays: 0` = open-ended (runs until the customer withdraws the capital). `lockInDays`: the capital cannot be withdrawn
+before this many days (Deposit Plan: 365). Maturity-paid plans: `PERCENTAGE` is the % of principal over the whole period, `FIXED` a rupee amount.
+
+Default plans: **Regular Plan** 5% / month, open-ended, no lock-in. **Deposit Plan** 6% / month, 365 days, capital locked for 365 days.
+On 1,00,000: Regular pays 250 a working day, 1,250 a week, 5,000 a month; Deposit pays 300 / 1,500 / 6,000.
 
 Preview →
 ```json
 {
-  "planId": 1, "planName": "Growth 90", "amount": 10000, "durationDays": 90,
-  "profitType": "PERCENTAGE", "profitValue": 10, "expectedProfit": 1000, "maturityAmount": 11000,
-  "startDate": "...", "maturityDate": "..."
+  "planId": 1, "planName": "Regular Plan", "amount": 100000, "source": "CAPITAL",
+  "durationDays": 0, "isOpenEnded": true, "lockInDays": 0, "lockInEndsAt": null,
+  "profitType": "PERCENTAGE", "profitValue": 5, "payoutMode": "DAILY", "rateBasis": "PER_MONTH",
+  "dailyProfit": 250, "weeklyProfit": 1250, "monthlyProfit": 5000, "creditsPerCycle": 20, "profitDays": 0, "payoutHourIst": 6,
+  "expectedProfit": 0, "maturityAmount": 100000,
+  "feePercent": 5, "capitalWithdrawalFee": 5000, "netCapitalOnWithdrawal": 95000,
+  "startDate": "...", "maturityDate": null
 }
 ```
+`expectedProfit` / `profitDays` are 0 for open-ended plans (no fixed total); fixed-term plans give the capped total over the term.
 
 Investment →
 ```json
 {
-  "id": 7, "reference": "INV-20260928-1A2B3C4D5E", "userId": 4, "planId": 1, "planName": "Growth 90",
-  "profitType": "PERCENTAGE", "profitValue": 10, "durationDays": 90,
-  "amount": 10000, "expectedProfit": 1000, "maturityAmount": 11000,
-  "startDate": "...", "maturityDate": "...",
+  "id": 7, "reference": "INV-20261014-1A2B3C4D5E", "userId": 4, "planId": 1, "planName": "Regular Plan",
+  "profitType": "PERCENTAGE", "profitValue": 5, "payoutMode": "DAILY", "rateBasis": "PER_MONTH",
+  "durationDays": 0, "isOpenEnded": true, "lockInDays": 0, "lockInEndsAt": null, "isLocked": false,
+  "amount": 100000, "expectedProfit": 0,
+  "dailyProfit": 250, "weeklyProfit": 1250, "monthlyProfit": 5000, "profitDays": 0,
+  "profitCredited": 2000, "profitRemaining": 0, "creditedDays": 8,
+  "creditsPerCycle": 20, "currentCycle": 0, "creditsThisCycle": 8, "nextCreditAt": "...", "nextCreditDue": false,
+  "feePercent": 5, "capitalWithdrawalFee": 5000, "netCapitalOnWithdrawal": 95000,
+  "maturityAmount": 100000, "startDate": "...", "maturityDate": null,
   "status": "ACTIVE|MATURED|WITHDRAWAL_REQUESTED|COMPLETED|CANCELLED",
-  "earlyWithdrawalAllowed": false, "canRequestWithdrawal": false,
-  "daysRemaining": 90, "progressPercent": 0,
+  "earlyWithdrawalAllowed": false, "canRequestWithdrawal": true,
+  "daysRemaining": 0, "progressPercent": 0,
   "maturedAt": null, "completedAt": null, "cancelledAt": null, "cancelReason": null, "createdAt": "..."
 }
 ```
-Show the "Request withdrawal" action only when `canRequestWithdrawal` is true.
+Show the "Withdraw capital" action only when `canRequestWithdrawal` is true (status ACTIVE/MATURED and not `isLocked`).
+`profitCredits[]` entries carry `cycleNo` (30-day cycle of the investment, 0-based).
 
 ### Withdrawals
 | Method | Path | Notes |
@@ -157,9 +186,10 @@ Show the "Request withdrawal" action only when `canRequestWithdrawal` is true.
 Withdrawal →
 ```json
 {
-  "id": 2, "reference": "WDR-20260928-AA11BB22CC", "userId": 4, "investmentId": 7,
-  "investmentReference": "INV-...", "planName": "Growth 90",
-  "principalAmount": 10000, "profitAmount": 1000, "totalAmount": 11000, "isEarly": false,
+  "id": 2, "reference": "WDR-20261014-AA11BB22CC", "userId": 4, "source": "INVESTMENT|WALLET", "bucket": "CAPITAL|PROFIT",
+  "investmentId": 7, "investmentReference": "INV-...", "planName": "Regular Plan",
+  "principalAmount": 100000, "profitAmount": 0, "totalAmount": 100000,
+  "feePercent": 5, "feeAmount": 5000, "netAmount": 95000, "isEarly": false,
   "payoutMethod": "BANK|UPI", "payoutUpiId": null, "payoutAccountHolder": "Rahul Sharma",
   "payoutAccountMasked": "XXXXXXXX8901", "payoutIfsc": "HDFC0001234", "payoutBankName": "HDFC Bank",
   "status": "PENDING|APPROVED|REJECTED|COMPLETED", "rejectionReason": null,
@@ -220,7 +250,10 @@ Notification → `{ id, type, title, message, relatedEntity, relatedId, isRead, 
 | GET | `/admin/settings` | staff | – |
 | PUT | `/admin/settings` | manager | any of the fields below |
 
-`{ walletMinTopup, walletMaxTopup, upiId, upiPayeeName, depositInstructions, requireKycForInvestment }`
+`{ walletMinTopup, walletMaxTopup, upiId, upiPayeeName, depositInstructions, bank*, requireKycForInvestment, requireKycForWithdrawal, walletMinWithdrawal, referralCommissionPercent, capitalWithdrawalFeePercent }`
+
+`capitalWithdrawalFeePercent` (default 5) is snapshotted onto each new investment (`feePercent`) and applied to every capital
+withdrawal; profit withdrawals are always free.
 
 ### Payment management
 | Method | Path | Role | Body |
@@ -266,15 +299,17 @@ Admin investment = Investment + `{ customerName, customerEmail, customerPhone }`
 
 Admin withdrawal = Withdrawal + `{ adminRemarks, customerName, customerEmail, customerPhone }`.
 Detail adds `payoutAccountNumber` (full number, managers only, else `null`) and
-`investment: { id, reference, planName, amount, expectedProfit, maturityAmount, durationDays, startDate, maturityDate, status }`.
+`investment: { id, reference, planName, amount, expectedProfit, maturityAmount, durationDays, startDate, maturityDate (null when open-ended), status }`.
 
-Flow: `PENDING → APPROVED → COMPLETED`, or `PENDING/APPROVED → REJECTED`.
+The admin pays **`netAmount`** (`totalAmount - feeAmount`). Flow: `PENDING → APPROVED → COMPLETED`, or `PENDING/APPROVED → REJECTED`.
+Rejecting a WALLET withdrawal refunds the held amount to the same `bucket`; rejecting an INVESTMENT withdrawal returns the
+investment to ACTIVE (it keeps earning).
 
 ### Wallet ledger
 | Method | Path | Role | Body |
 |---|---|---|---|
-| GET | `/admin/wallets/transactions` | staff | filters: `type`, `direction`, `userId`, `search`, `startDate`, `endDate` |
-| POST | `/admin/wallets/:userId/adjust` | manager | `{ direction: "CREDIT"\|"DEBIT", amount, reason }` |
+| GET | `/admin/wallets/transactions` | staff | filters: `type`, `direction`, `bucket`, `userId`, `search`, `startDate`, `endDate` |
+| POST | `/admin/wallets/:userId/adjust` | manager | `{ direction: "CREDIT"\|"DEBIT", bucket?: "CAPITAL"\|"PROFIT" (default PROFIT), amount, reason }` |
 
 Admin transaction = Transaction + `{ userId, customerName, customerEmail, customerPhone }`.
 
@@ -309,8 +344,53 @@ JSON →
 1. Wallet top-ups must be within the admin-defined minimum/maximum.
 2. Investments must be within the plan's minimum/maximum.
 3. Profit and maturity date are calculated server-side from the plan; the client never supplies them.
-4. An active investment cannot be withdrawn unless an admin enables early withdrawal for it. Early withdrawals pay the principal only unless the admin sets a profit amount on approval.
-5. A wallet is credited only when an admin approves the payment receipt.
+4. **Capital withdrawal**: the capital of an investment is withdrawn in full by closing the investment (`POST /investments/:id/withdraw`); uninvested capital is withdrawn in full from the capital wallet (`POST /wallet/withdrawals` with `bucket: "CAPITAL"`). Both deduct the capital withdrawal fee (`feePercent`, default 5%): 1,00,000 → 5,000 fee → 95,000 paid. During a plan's lock-in (`lockInDays`) the capital cannot be withdrawn unless an admin enables an early exit for that investment. Maturity-paid plans closed early pay the principal only unless the admin sets a profit amount on approval.
+5. The **capital wallet** is credited only when an admin approves the payment receipt. At maturity of a fixed-term plan the capital returns to the capital wallet automatically (`MATURITY_PRINCIPAL`, investment → COMPLETED); the customer re-invests it for free or withdraws it with the fee.
 6. Every payment, investment, withdrawal and ledger entry has a unique reference (`DEP-`, `INV-`, `WDR-`, `TXN-`).
 7. A UPI transaction ID can be credited only once.
 8. Every balance change writes an immutable ledger row with the balance before and after; every admin action is written to the activity log.
+9. **Daily-profit plans** (`payoutMode: "DAILY"`): with `rateBasis: "PER_MONTH"` the daily credit is `capital × profitValue% ÷ 20` (`PER_YEAR`: ÷ 240; legacy `PER_DAY`: the % itself). It is credited to the **profit wallet** on every working day (Monday–Friday, IST) **after** the start day, at **06:00 AM IST**; Saturdays and Sundays are skipped, and at most **20 credits are paid per 30-day cycle** so a month never pays more than the rate (a 30-day window has 20–22 weekdays). Profit is never added to the invested capital (no compounding). Open-ended plans earn until the capital is withdrawn; fixed-term plans earn up to the maturity day and `expectedProfit = dailyProfit × profitDays` (capped days). Credits are recorded in `profit_credits` (unique per investment per day, with `cycle_no`), so the job can run any number of times without paying twice. Days missed while the server was down are paid on the next run. Ledger type: `PROFIT`, bucket `PROFIT`.
+10. **Referral commission**: when a referred customer invests, a `referral_commissions` row is created for `referralCommissionPercent` (default 0.5%) of the investment amount. It is credited to the referrer's **profit wallet** at the first 06:00 AM run once the investment is 24 hours old, unless the investment was cancelled in the meantime. Ledger type: `REFERRAL_COMMISSION`. Setting `referralCommissionPercent: 0` disables it.
+11. **Wallet withdrawals** (`source: "WALLET"`): the amount is debited from the chosen bucket when the request is made (`WITHDRAWAL` debit), so it cannot be spent twice while an admin verifies it. Rejecting the request refunds it to the same bucket (`REFUND` credit); completing it only records the payment reference and proof. PROFIT withdrawals: any amount ≥ `walletMinWithdrawal`, no fee. CAPITAL withdrawals: the whole available capital balance, fee deducted. When `requireKycForWithdrawal` is on (default), only VERIFIED-KYC customers can request any payout.
+12. Full bank account numbers (payout details, withdrawal destination, KYC) are returned only to `SUPER_ADMIN` and `ADMIN`; `EDITOR` receives the masked form.
+
+## 4. Endpoints added for daily profit, referrals and wallet withdrawals
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| POST | `/wallet/withdrawals` | customer | `{ amount, payoutMethod? }` → withdrawal with `source: "WALLET"` |
+| GET | `/referrals/my` | customer | adds `commissionPercent`, `totalCommissionEarned`, `pendingCommission`, `commissions[]`, `referrals[].commissionEarned` |
+| GET | `/admin/referrals` | staff | each row adds `commissionEarned`, `commissionPending`, `commissionCount` |
+| GET | `/admin/referrals/commissions` | staff | `?status=PENDING\|CREDITED\|CANCELLED&page&limit`, `meta.counts` |
+| GET | `/admin/payouts/status` | staff | `{ schedule, lastRunAt }` |
+| POST | `/admin/payouts/run` | manager | runs the 06:00 job immediately; returns `{ payableDay, profitCredits, profitAmount, commissions, commissionAmount }` |
+| PUT | `/admin/settings` | manager | new fields `requireKycForWithdrawal`, `walletMinWithdrawal`, `referralCommissionPercent` |
+| POST/PUT | `/admin/investment-plans` | manager | new field `payoutMode: "AT_MATURITY" \| "DAILY"` (DAILY requires `profitType: "PERCENTAGE"`, max 100) |
+
+New response fields: plans and investments carry `payoutMode`; investments also `dailyProfit`, `profitDays`, `profitCredited`, `profitRemaining`; `/investments/preview` adds `dailyProfit`, `profitDays`, `payoutHourIst`; `/wallet` adds `dailyProfitCredited`, `lastProfitCreditDay`, `referralEarnings`, `referralEarningsPending`, `pendingWithdrawalAmount` and `config.{minWithdrawal, requireKycForWithdrawal, referralCommissionPercent, payoutSchedule}`; withdrawals carry `source` and a nullable `investmentId`; the finance dashboard adds `totalDailyProfitCredited`, `totalReferralCommissionPaid`, `pendingReferralCommission*`, `lastPayoutRunAt`, `payoutSchedule`, `walletWithdrawalsPending`.
+
+## 5. Transparency and manual-verification fields
+
+| Endpoint | Role | Added |
+|---|---|---|
+| `GET /investments`, `GET /investments/:id`, `GET /admin/investments*` | customer / staff | DAILY investments add `creditedDays`, `nextCreditAt` (ISO instant of the next 06:00 IST credit, null once fully paid) and `nextCreditDue` (true when that day has passed 06:00 and the job has not caught up yet) |
+| `GET /investments/:id`, `GET /admin/investments/:id` | customer / staff | `profitCredits[]` — every daily credit: `{ id, creditDay, amount, creditedAt, walletTransactionId }`, newest first |
+| `GET /kyc/status` | customer | `details` (masked PAN / Aadhaar / account number, holder name, IFSC), `history[]` (`{ id, action, remarks, createdAt }`, no reviewer identity), `nextStep` (plain-language guidance for the current status), `hasPan/hasAadhaar/hasPassbook`, `submittedAt`, `reviewedAt` |
+| `GET /admin/deposits/:id` | staff | `verification`: `{ utrAlreadyCredited, utrMatches[] (other submissions quoting the same UPI transaction ID, any customer), customerKycStatus, kycAccountHolderName, previousDeposits: { approved, rejected, pending }, isFirstDeposit }` |
+
+Bank transfer top-ups: `POST /wallet/deposits` accepts `paymentMethod: "UPI" | "BANK_TRANSFER"` (default UPI); `upiTransactionId` holds the UPI UTR or the bank transfer reference. Deposits carry `paymentMethod`. `GET /wallet` config adds `bankTransferEnabled`, `bankAccountName`, `bankAccountNumber`, `bankIfsc`, `bankName`, `bankTransferInstructions`; `PUT /admin/settings` accepts the same bank fields (all four account fields together, or all empty, to switch the option off).
+
+Customer website pages built on these: `/referrals` (share link `/register?ref=CODE`, WhatsApp / native share, referred list, commission history), investment cards (next credit time, days credited, per-day profit history), profile KYC tracker (3-step progress, submitted details, review history, next action).
+
+Admin panel: the Approve Payment dialog shows the verification checks above; the Verify KYC dialog requires a 4-point checklist (documents present, PAN matches profile, Aadhaar matches PAN, passbook matches holder / account / IFSC with automatic name and IFSC-format hints) before approval; investment details list every daily credit with its ledger entry; Settings → Permissions lists what each role can do.
+
+Verification script: `cd backend/node && npx tsx scripts/verify-daily-payouts.mts` (applies the schema patches and seeds the plans, creates two throwaway customers, invests 1,00,000 in the Regular Plan back-dated by 10 days, runs the job and asserts 250 per working day into the profit wallet, the 20-credit cap, the referral commission, the Deposit Plan lock-in, the 5% capital withdrawal fee (95,000 net), profit withdrawals without fee, and idempotency).
+
+## 6. Two-bucket wallet and monthly-rate plans (2026-10-14)
+
+See `docs/INVESTMENT_PLANS_AND_WALLET_ARCHITECTURE.md` for the design. Schema additions (applied automatically by
+`applySchemaPatches` on start, with one-time backfills): `investment_plans.rate_basis`, `lock_in_days`;
+`investments.rate_basis`, `lock_in_days`, `fee_percent`, nullable `maturity_date`; `wallets.capital_balance`,
+`profit_balance` (`balance` kept as their sum); `wallet_transactions.bucket`; `withdrawals.bucket`, `fee_percent`,
+`fee_amount`, `net_amount`; `profit_credits.cycle_no`. Existing DAILY plans/investments are backfilled as `PER_DAY`
+(their old per-working-day meaning) and the legacy plans are deactivated when the Regular / Deposit plans are seeded.

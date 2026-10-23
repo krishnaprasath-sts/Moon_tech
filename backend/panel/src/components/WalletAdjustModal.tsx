@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useId } from 'react';
-import { Wallet, Loader2, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
+import { Wallet, Loader2, ArrowDownLeft, ArrowUpRight, Landmark, TrendingUp } from 'lucide-react';
 import { ModalShell } from './ModalShell';
 import { useAdjustWallet } from '../hooks/useFinance';
 import { useToast } from '../context/ToastContext';
-import { WalletTxnDirection } from '../types';
+import { WalletBucket, WalletTxnDirection } from '../types';
 import { Field, FormError, inputClass, textareaClass, btnGhostClass, btnSuccessClass, btnDangerClass, labelClass } from './ui';
 import { formatINR, getApiErrorMessage, hasMaxTwoDecimals } from '../utils/finance';
 
@@ -12,20 +12,28 @@ interface WalletAdjustModalProps {
   onClose: () => void;
   userId: number | string;
   customerName: string;
-  walletBalance: number;
+  capitalBalance: number;
+  profitBalance: number;
   onSuccess?: () => void;
 }
+
+const BUCKET_LABELS: Record<WalletBucket, string> = {
+  CAPITAL: 'Capital wallet',
+  PROFIT: 'Profit wallet',
+};
 
 export const WalletAdjustModal: React.FC<WalletAdjustModalProps> = ({
   isOpen,
   onClose,
   userId,
   customerName,
-  walletBalance,
+  capitalBalance,
+  profitBalance,
   onSuccess,
 }) => {
   const formId = useId();
   const [direction, setDirection] = useState<WalletTxnDirection>('CREDIT');
+  const [bucket, setBucket] = useState<WalletBucket>('PROFIT');
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
   const [errors, setErrors] = useState<{ amount?: string; reason?: string }>({});
@@ -38,6 +46,7 @@ export const WalletAdjustModal: React.FC<WalletAdjustModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setDirection('CREDIT');
+      setBucket('PROFIT');
       setAmount('');
       setReason('');
       setErrors({});
@@ -45,6 +54,7 @@ export const WalletAdjustModal: React.FC<WalletAdjustModalProps> = ({
     }
   }, [isOpen]);
 
+  const walletBalance = bucket === 'CAPITAL' ? capitalBalance : profitBalance;
   const value = Number(amount);
   const isAmountValid = amount.trim() !== '' && Number.isFinite(value) && value > 0 && hasMaxTwoDecimals(amount);
   const newBalance = direction === 'CREDIT' ? walletBalance + value : walletBalance - value;
@@ -54,7 +64,7 @@ export const WalletAdjustModal: React.FC<WalletAdjustModalProps> = ({
     if (amount.trim() === '' || !Number.isFinite(value) || value <= 0) next.amount = 'Amount must be greater than 0';
     else if (!hasMaxTwoDecimals(amount)) next.amount = 'Use at most 2 decimal places';
     else if (direction === 'DEBIT' && value > walletBalance) {
-      next.amount = `Cannot debit more than the wallet balance of ${formatINR(walletBalance)}`;
+      next.amount = `Cannot debit more than the ${BUCKET_LABELS[bucket].toLowerCase()} balance of ${formatINR(walletBalance)}`;
     }
     if (reason.trim().length < 5) next.reason = 'Reason must be at least 5 characters';
     setErrors(next);
@@ -68,9 +78,11 @@ export const WalletAdjustModal: React.FC<WalletAdjustModalProps> = ({
     if (!validate()) return;
 
     try {
-      await adjustWallet({ userId, data: { direction, amount: value, reason: reason.trim() } });
+      await adjustWallet({ userId, data: { direction, bucket, amount: value, reason: reason.trim() } });
       toast.success(
-        `${formatINR(value)} ${direction === 'CREDIT' ? 'credited to' : 'debited from'} ${customerName}'s wallet. New balance: ${formatINR(newBalance)}`,
+        `${formatINR(value)} ${direction === 'CREDIT' ? 'credited to' : 'debited from'} ${customerName}'s ${BUCKET_LABELS[
+          bucket
+        ].toLowerCase()}. New balance: ${formatINR(newBalance)}`,
         'Wallet adjusted'
       );
       onSuccess?.();
@@ -89,7 +101,7 @@ export const WalletAdjustModal: React.FC<WalletAdjustModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Adjust Wallet"
-      subtitle={`${customerName} • Current balance ${formatINR(walletBalance)}`}
+      subtitle={`${customerName} • Capital ${formatINR(capitalBalance)} • Profit ${formatINR(profitBalance)}`}
       icon={Wallet}
       maxWidthClass="max-w-lg"
       disableClose={isPending}
@@ -115,6 +127,46 @@ export const WalletAdjustModal: React.FC<WalletAdjustModalProps> = ({
     >
       <form id={formId} onSubmit={handleSubmit} noValidate className="space-y-5">
         <FormError message={formError} />
+
+        <div>
+          <p className={labelClass}>
+            Wallet <span className="text-rose-500">*</span>
+          </p>
+          <div role="radiogroup" aria-label="Wallet" className="grid grid-cols-2 gap-2">
+            {(['CAPITAL', 'PROFIT'] as WalletBucket[]).map((option) => {
+              const selected = bucket === option;
+              const balance = option === 'CAPITAL' ? capitalBalance : profitBalance;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => {
+                    setBucket(option);
+                    setErrors((prev) => ({ ...prev, amount: undefined }));
+                  }}
+                  className={`text-left px-3 py-2.5 rounded-xl text-xs border transition ${
+                    selected
+                      ? 'bg-brand-500/10 text-brand-700 dark:text-brand-300 border-brand-500/40'
+                      : 'bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <span className="font-bold flex items-center gap-1.5">
+                    {option === 'CAPITAL' ? <Landmark className="w-3.5 h-3.5" /> : <TrendingUp className="w-3.5 h-3.5" />}
+                    {BUCKET_LABELS[option]}
+                  </span>
+                  <span className="block font-mono tabular-nums text-[11px] mt-0.5">{formatINR(balance)}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">
+            {bucket === 'CAPITAL'
+              ? 'Capital can be invested and withdrawn in full at any time, without fee.'
+              : 'Profit can be withdrawn by the customer any time without fee.'}
+          </p>
+        </div>
 
         <div>
           <p className={labelClass}>
@@ -179,7 +231,7 @@ export const WalletAdjustModal: React.FC<WalletAdjustModalProps> = ({
                 newBalance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'
               }`}
             >
-              Balance after adjustment: <strong className="font-mono">{formatINR(newBalance)}</strong>
+              {BUCKET_LABELS[bucket]} after adjustment: <strong className="font-mono">{formatINR(newBalance)}</strong>
             </p>
           )}
         </Field>

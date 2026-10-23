@@ -200,12 +200,6 @@ export class ProfileService {
     return { message: 'Password changed successfully' };
   }
 
-  private static async findByIdentifier(identifier: string): Promise<User | null> {
-    const clean = identifier.trim();
-    return User.findOne({
-      where: { [Op.or]: [{ email: clean.toLowerCase() }, { phone: clean }] },
-    });
-  }
 
   /**
    * Issues a one-time code. The response is identical whether or not the
@@ -217,7 +211,7 @@ export class ProfileService {
       expiresInMinutes: OTP_EXPIRY_MINUTES,
     };
 
-    const user = await this.findByIdentifier(input.identifier);
+    const user = await User.findOne({ where: { email: input.email } });
     if (!user || user.status === UserStatus.SUSPENDED || user.status === UserStatus.INACTIVE) {
       return response;
     }
@@ -265,7 +259,7 @@ export class ProfileService {
   public static async resetPassword(input: ResetPasswordInput, meta: RequestMeta = {}) {
     const invalid = new UnauthorizedError('Invalid or expired reset code');
 
-    const user = await this.findByIdentifier(input.identifier);
+    const user = await User.findOne({ where: { email: input.email } });
     if (!user) {
       throw invalid;
     }

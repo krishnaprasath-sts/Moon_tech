@@ -1,14 +1,26 @@
 "use client";
 
+import { useCallback } from 'react';
+
 import Link from 'next/link';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { FloatingSupport } from '@/components/layout/FloatingSupport';
+import { RequireAuth } from '@/components/layout/RequireAuth';
 import { ArrowRight, Star } from 'lucide-react';
 import { api, InvestmentPlan } from '@/lib/api';
 import { useAuth } from '@/lib/useAuth';
 import { useAsyncData } from '@/lib/useAsyncData';
-import { exampleAmount, estimateProfit, formatDuration, formatINRShort, formatPlanRange, formatProfit } from '@/lib/format';
+import {
+  exampleAmount,
+  estimateProfit,
+  formatDuration,
+  formatINRShort,
+  formatPlanRange,
+  formatProfit,
+  isOpenEndedPlan,
+  monthlyProfitFor,
+} from '@/lib/format';
 
 /** Expected profit over the term as a percentage of the minimum investment, used only to rank plans. */
 function returnRate(plan: InvestmentPlan): number {
@@ -34,6 +46,14 @@ interface FeaturedCard {
 }
 
 function describePlan(plan: InvestmentPlan): string {
+  if (plan.payoutMode === 'DAILY') {
+    const rate = formatProfit(plan.profitType, plan.profitValue, plan.payoutMode, plan.rateBasis);
+    return isOpenEndedPlan(plan)
+      ? `${rate} on your capital, credited to your profit wallet every working day at 6:00 AM. Close the plan whenever you like.`
+      : `${rate} on your capital, credited to your profit wallet every working day at 6:00 AM for ${formatDuration(
+          plan.durationDays
+        )}. Your capital is returned at maturity, or earlier if you close the plan.`;
+  }
   return `Expected profit of ${formatProfit(plan.profitType, plan.profitValue)} over a ${formatDuration(
     plan.durationDays
   )} term, paid with your principal at maturity as per the plan terms.`;
@@ -64,9 +84,11 @@ function buildCards(featured: InvestmentPlan[] | null, all: InvestmentPlan[] | n
     cards.push({
       plan: lowestMinPlan,
       tag: 'Easy to start',
-      blurb: `Start investing with as little as ${formatINRShort(lowestMinPlan.minAmount)} for ${formatDuration(
-        lowestMinPlan.durationDays
-      )}.`,
+      blurb: isOpenEndedPlan(lowestMinPlan)
+        ? `Start investing with as little as ${formatINRShort(lowestMinPlan.minAmount)}; close the plan whenever you like.`
+        : `Start investing with as little as ${formatINRShort(lowestMinPlan.minAmount)} for ${formatDuration(
+            lowestMinPlan.durationDays
+          )}.`,
       primary: false,
     });
   }
@@ -89,13 +111,19 @@ function PlanOfferCard({ card }: { card: FeaturedCard }) {
 
       <div>
         <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-white/[0.06] mb-5">
-          <div className="text-[10px] uppercase tracking-wider text-zinc-500">Expected profit</div>
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+            {plan.payoutMode === 'DAILY' ? 'Profit rate' : 'Expected profit'}
+          </div>
           <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
-            {formatProfit(plan.profitType, plan.profitValue)}
+            {formatProfit(plan.profitType, plan.profitValue, plan.payoutMode, plan.rateBasis)}
           </div>
           <div className="text-[10px] text-zinc-500 mt-1">
-            e.g. {formatINRShort(example)} becomes {formatINRShort(example + estimateProfit(plan, example))} in{' '}
-            {formatDuration(plan.durationDays)} · Invest {formatPlanRange(plan)}
+            {plan.payoutMode === 'DAILY'
+              ? `e.g. ${formatINRShort(example)} earns ${formatINRShort(monthlyProfitFor(plan, example))} a month, paid every working day`
+              : `e.g. ${formatINRShort(example)} becomes ${formatINRShort(example + estimateProfit(plan, example))} in ${formatDuration(
+                  plan.durationDays
+                )}`}{' '}
+            · Invest {formatPlanRange(plan)}
           </div>
         </div>
 
@@ -109,9 +137,19 @@ function PlanOfferCard({ card }: { card: FeaturedCard }) {
 }
 
 export default function OffersPage() {
+  return (
+    <RequireAuth message="Loading featured plans...">
+      <OffersContent />
+    </RequireAuth>
+  );
+}
+
+function OffersContent() {
   const featured = useAsyncData(api.getFeaturedPlans);
   const plans = useAsyncData(api.getInvestmentPlans);
   const { token } = useAuth({ required: false });
+  const referralsFetcher = useCallback(() => api.getMyReferrals(token as string), [token]);
+  const referrals = useAsyncData(token ? referralsFetcher : null);
 
   const loading = (!featured.data && !featured.error) || (!plans.data && !plans.error);
   const failed = Boolean(featured.error && plans.error && !featured.data && !plans.data);
@@ -181,15 +219,27 @@ export default function OffersPage() {
                   <h3 className="text-base font-semibold text-zinc-950 dark:text-white mt-4 mb-2">Invite friends</h3>
                   <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed mb-6">
                     Every account gets a unique referral code. Share it with friends so they can enter it when they
-                    register.
+                    register. You earn{' '}
+                    <span className="font-semibold text-zinc-900 dark:text-white">
+                      {referrals.data ? `${referrals.data.commissionPercent}%` : 'a commission'}
+                    </span>{' '}
+                    of every amount they invest, credited to your profit wallet instantly when they invest.
                   </p>
                 </div>
 
                 <div>
                   <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-white/[0.06] mb-5">
                     <div className="text-[10px] uppercase tracking-wider text-zinc-500">Your referral code</div>
-                    <div className="text-sm font-bold text-zinc-900 dark:text-white mt-0.5">Shown in your profile</div>
-                    <div className="text-[10px] text-zinc-500 mt-1">{token ? 'Open your profile to copy it' : 'Available after you register'}</div>
+                    <div className="text-sm font-bold text-zinc-900 dark:text-white mt-0.5 font-mono select-all">
+                      {referrals.data?.referralCode || 'Shown in your profile'}
+                    </div>
+                    <div className="text-[10px] text-zinc-500 mt-1">
+                      {referrals.data
+                        ? `${referrals.data.totalReferrals} referred · ${formatINRShort(referrals.data.totalCommissionEarned)} earned`
+                        : token
+                        ? 'Open your profile to copy it'
+                        : 'Available after you register'}
+                    </div>
                   </div>
 
                   <Link href={token ? '/profile' : '/register'} className={secondaryLinkClass}>

@@ -1,16 +1,24 @@
 import { DataTypes, Model, Optional } from 'sequelize';
 import { sequelize } from '../config/database.js';
-import { WithdrawalStatus, PayoutMethod } from '../types/index.js';
+import { WithdrawalStatus, PayoutMethod, WithdrawalSource, WalletBucket } from '../types/index.js';
 import { decimalGetter } from '../utils/money.js';
 
 export interface WithdrawalAttributes {
   id: number;
   reference: string;
   user_id: number;
-  investment_id: number;
+  source: WithdrawalSource;
+  /** CAPITAL withdrawals carry the capital withdrawal fee; PROFIT withdrawals are free */
+  bucket: WalletBucket;
+  investment_id?: number | null;
   principal_amount: number;
   profit_amount: number;
+  /** Gross amount (principal + profit) */
   total_amount: number;
+  fee_percent: number;
+  fee_amount: number;
+  /** What is actually paid to the customer: total_amount - fee_amount */
+  net_amount: number;
   is_early: boolean;
   payout_method: PayoutMethod;
   payout_upi_id?: string | null;
@@ -36,6 +44,12 @@ export interface WithdrawalCreationAttributes
   extends Optional<
     WithdrawalAttributes,
     | 'id'
+    | 'source'
+    | 'bucket'
+    | 'investment_id'
+    | 'fee_percent'
+    | 'fee_amount'
+    | 'net_amount'
     | 'is_early'
     | 'payout_upi_id'
     | 'payout_account_holder'
@@ -63,10 +77,15 @@ export class Withdrawal
   declare public id: number;
   declare public reference: string;
   declare public user_id: number;
-  declare public investment_id: number;
+  declare public source: WithdrawalSource;
+  declare public bucket: WalletBucket;
+  declare public investment_id: number | null;
   declare public principal_amount: number;
   declare public profit_amount: number;
   declare public total_amount: number;
+  declare public fee_percent: number;
+  declare public fee_amount: number;
+  declare public net_amount: number;
   declare public is_early: boolean;
   declare public payout_method: PayoutMethod;
   declare public payout_upi_id: string | null;
@@ -108,9 +127,20 @@ Withdrawal.init(
         key: 'id',
       },
     },
+    // INVESTMENT: payout of a matured/early investment. WALLET: payout of free wallet balance.
+    source: {
+      type: DataTypes.ENUM(...Object.values(WithdrawalSource)),
+      allowNull: false,
+      defaultValue: WithdrawalSource.INVESTMENT,
+    },
+    bucket: {
+      type: DataTypes.ENUM(...Object.values(WalletBucket)),
+      allowNull: false,
+      defaultValue: WalletBucket.CAPITAL,
+    },
     investment_id: {
       type: DataTypes.INTEGER,
-      allowNull: false,
+      allowNull: true,
       references: {
         model: 'investments',
         key: 'id',
@@ -130,6 +160,24 @@ Withdrawal.init(
       type: DataTypes.DECIMAL(18, 2),
       allowNull: false,
       get: decimalGetter('total_amount'),
+    },
+    fee_percent: {
+      type: DataTypes.DECIMAL(5, 2),
+      allowNull: false,
+      defaultValue: 0,
+      get: decimalGetter('fee_percent'),
+    },
+    fee_amount: {
+      type: DataTypes.DECIMAL(18, 2),
+      allowNull: false,
+      defaultValue: 0,
+      get: decimalGetter('fee_amount'),
+    },
+    net_amount: {
+      type: DataTypes.DECIMAL(18, 2),
+      allowNull: false,
+      defaultValue: 0,
+      get: decimalGetter('net_amount'),
     },
     is_early: {
       type: DataTypes.BOOLEAN,

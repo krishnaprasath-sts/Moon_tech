@@ -5,9 +5,10 @@ import { ensureDatabaseExists } from './config/database.js';
 import { sequelize } from './models/index.js';
 import { logger } from './utils/logger.js';
 import { FileService } from './services/fileService.js';
+import { EmailService } from './services/emailService.js';
 import { initJobs } from './jobs/index.js';
-import { seedDatabase, seedInvestmentDefaults } from './database/seeders/seed.js';
-import { applySchemaPatches } from './database/migrations/schemaPatches.js';
+import { seedDatabase, seedInvestmentDefaults, seedDailyProfitPlans } from './database/seeders/seed.js';
+import { applySchemaPatches, applyDataPatches } from './database/migrations/schemaPatches.js';
 
 let server: http.Server;
 
@@ -50,29 +51,47 @@ async function bootstrap() {
 
       // Databases created before the investment module still need its default plans
       await seedInvestmentDefaults();
+      await seedDailyProfitPlans();
+      await applyDataPatches();
     } catch (dbError: any) {
       logger.error('Database connection / synchronization failed:', dbError);
       logger.warn('Please ensure your MySQL service is running or check your .env configuration.');
       // Continue so that the server can still run or be inspected
     }
 
+    // 2b. Warm up the mail connection in the background (sign-in codes depend on it)
+    EmailService.warmUp().catch(() => {});
+
     // 3. Initialize background jobs
     initJobs();
 
-    // 4. Start HTTP Server
-    server = app.listen(config.port, () => {
-      logger.info(`Server running in [${config.env}] mode on http://localhost:${config.port}`);
-      logger.info(`API Base URL: http://localhost:${config.port}/api`);
-      logger.info(`Health check: http://localhost:${config.port}/api/health`);
-    });
+    // 4. Start HTTP Server with retry capability if port is in TIME_WAIT or briefly busy
+    const startListening = (retriesLeft = 5, retryDelayMs = 1500) => {
+      server = app.listen(config.port, () => {
+        logger.info(`Server running in [${config.env}] mode on http://localhost:${config.port}`);
+        logger.info(`API Base URL: http://localhost:${config.port}/api`);
+        logger.info(`Health check: http://localhost:${config.port}/api/health`);
+      });
 
-    server.on('error', (err: any) => {
-      if (err.code === 'EADDRINUSE') {
-        logger.error(`Port ${config.port} is already in use by another process. Please free port ${config.port} or check running processes.`);
-      } else {
-        logger.error('HTTP server encountered an error:', err);
-      }
-    });
+      server.on('error', (err: any) => {
+        if (err.code === 'EADDRINUSE') {
+          if (retriesLeft > 0) {
+            logger.warn(`Port ${config.port} is busy or closing (EADDRINUSE). Retrying in ${retryDelayMs / 1000}s... (${retriesLeft} retries remaining)`);
+            setTimeout(() => {
+              server.close();
+              startListening(retriesLeft - 1, retryDelayMs);
+            }, retryDelayMs);
+          } else {
+            logger.error(`Port ${config.port} is already in use by another process. Please free port ${config.port} or check running processes.`);
+            process.exit(1);
+          }
+        } else {
+          logger.error('HTTP server encountered an error:', err);
+        }
+      });
+    };
+
+    startListening();
 
   } catch (error: any) {
     logger.error('Fatal error during application startup:', error);

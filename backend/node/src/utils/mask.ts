@@ -54,3 +54,21 @@ export function extractBankAccountLast4(accountNumber: string): string {
   const clean = accountNumber.replace(/\s+/g, '');
   return clean.slice(-4);
 }
+
+/** r****l@example.com: first and last character of the local part, domain kept */
+export function maskEmail(email: string): string {
+  const clean = String(email || '').trim();
+  const at = clean.indexOf('@');
+  if (at <= 0) return clean ? '****' : '';
+  const local = clean.slice(0, at);
+  const domain = clean.slice(at);
+  if (local.length <= 2) return `${local[0]}***${domain}`;
+  return `${local[0]}${'*'.repeat(Math.min(6, local.length - 2))}${local[local.length - 1]}${domain}`;
+}
+
+/** +91 XXXXXX3210: only the last four digits of a phone number */
+export function maskPhone(phone: string): string {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits.length < 4) return digits ? 'XXXX' : '';
+  return `XXXXXX${digits.slice(-4)}`;
+}

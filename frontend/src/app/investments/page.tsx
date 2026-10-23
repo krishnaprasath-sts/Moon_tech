@@ -3,7 +3,7 @@
 import React, { Suspense, useCallback, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Banknote, Check, CheckCircle2, Eye, Plus, TrendingUp, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Banknote, Check, CheckCircle2, ChevronDown, Clock, Eye, Plus, TrendingUp, X } from 'lucide-react';
 import {
   api,
   getErrorMessage,
@@ -15,7 +15,14 @@ import {
 } from '@/lib/api';
 import { useAuth } from '@/lib/useAuth';
 import { useAsyncData } from '@/lib/useAsyncData';
-import { formatDate, formatDateTime, formatDuration, formatINR, formatProfit } from '@/lib/format';
+import {
+  BUCKET_LABELS,
+  formatDate,
+  formatDateTime,
+  formatINR,
+  formatProfit,
+  PAYOUT_TIME_LABEL,
+} from '@/lib/format';
 import {
   accentButtonClass,
   Alert,
@@ -104,7 +111,7 @@ function InvestmentsContent() {
     <PageShell>
       <PageHeader
         title="My investments"
-        subtitle="Track your investments, maturity dates and withdrawal requests."
+        subtitle="Track your invested capital, the daily profit it earns, maturity dates and withdrawal requests."
         actions={
           <Link href="/plans" className={primaryButtonClass}>
             <Plus className="w-3.5 h-3.5" />
@@ -113,7 +120,7 @@ function InvestmentsContent() {
         }
       />
 
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1" role="tablist" aria-label="Investment filters">
+      <div className="flex items-center gap-2 flex-wrap" role="tablist" aria-label="Investment filters">
         {TABS.map((item) => {
           const selected = tab === item.id;
           return (
@@ -142,11 +149,11 @@ function InvestmentsContent() {
             <EmptyState
               icon={<Banknote className="w-4 h-4" />}
               title="No withdrawal requests yet"
-              description="Once an investment matures you can request a withdrawal. Your requests and their payment status will appear here."
+              description="Profit can be withdrawn any time from the Wallet page; capital is withdrawn by closing an investment or from the capital wallet. Your requests and their payment status will appear here."
               action={
-                <button type="button" onClick={() => changeTab('MATURED')} className={secondaryButtonClass}>
-                  View matured investments
-                </button>
+                <Link href="/wallet" className={secondaryButtonClass}>
+                  Go to wallet
+                </Link>
               }
             />
           ) : (
@@ -188,7 +195,7 @@ function InvestmentsContent() {
             title={tab === 'ALL' ? 'No investments yet' : `No ${TABS.find((item) => item.id === tab)?.label.toLowerCase()} investments`}
             description={
               tab === 'ALL'
-                ? 'Choose an investment plan to put your wallet balance to work.'
+                ? 'Choose an investment plan to put your capital to work and start earning daily profit.'
                 : 'Investments with this status will appear here.'
             }
             action={
@@ -216,6 +223,7 @@ function InvestmentsContent() {
               <InvestmentCard
                 key={investment.id}
                 investment={investment}
+                token={token}
                 onWithdraw={() => setWithdrawTarget(investment)}
               />
             ))}
@@ -252,7 +260,65 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function InvestmentCard({ investment, onWithdraw }: { investment: Investment; onWithdraw: () => void }) {
+function nextCreditLabel(investment: Investment): string | null {
+  if (investment.payoutMode !== 'DAILY' || !investment.nextCreditAt) return null;
+  if (investment.nextCreditDue) return 'Next credit is being processed now';
+  const at = new Date(investment.nextCreditAt);
+  const now = new Date();
+  const sameDay = at.toDateString() === now.toDateString();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  const isTomorrow = at.toDateString() === tomorrow.toDateString();
+  const dayLabel = sameDay ? 'today' : isTomorrow ? 'tomorrow' : at.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+  return `Next credit ${dayLabel} at ${PAYOUT_TIME_LABEL}`;
+}
+
+function ProfitHistory({ token, investment }: { token: string; investment: Investment }) {
+  const fetcher = useCallback(() => api.getInvestment(token, investment.id), [token, investment.id]);
+  const detail = useAsyncData(fetcher);
+  if (detail.error && !detail.data) return <ErrorState message={detail.error} onRetry={detail.reload} />;
+  if (!detail.data) return <LoadingRows rows={3} />;
+  const credits = detail.data.profitCredits || [];
+  if (credits.length === 0) {
+    return (
+      <p className="text-[11px] text-zinc-500 py-2">
+        No profit credited yet. The first credit lands on the first working day after your investment starts, at {PAYOUT_TIME_LABEL}.
+      </p>
+    );
+  }
+  return (
+    <div className="max-h-64 overflow-y-auto rounded-lg border border-zinc-100 dark:border-white/[0.06]">
+      <table className="w-full text-xs">
+        <thead className="bg-zinc-50 dark:bg-white/[0.03] text-[10px] uppercase tracking-wider text-zinc-500 sticky top-0">
+          <tr>
+            <th className="text-left font-semibold px-3 py-2">Day</th>
+            <th className="text-left font-semibold px-3 py-2 hidden sm:table-cell">Credited at</th>
+            <th className="text-right font-semibold px-3 py-2">Profit</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-zinc-100 dark:divide-white/[0.06]">
+          {credits.map((c, i) => (
+            <tr key={c.id}>
+              <td className="px-3 py-2 text-zinc-800 dark:text-zinc-200">
+                <span className="text-zinc-400 tabular-nums mr-2">#{credits.length - i}</span>
+                {new Date(`${c.creditDay}T00:00:00+05:30`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                {investment.creditsPerCycle !== null && (
+                  <span className="text-[10px] text-zinc-400 ml-2">month {c.cycleNo + 1}</span>
+                )}
+              </td>
+              <td className="px-3 py-2 text-zinc-500 hidden sm:table-cell">{formatDateTime(c.creditedAt)}</td>
+              <td className="px-3 py-2 text-right tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">+{formatINR(c.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function InvestmentCard({ investment, onWithdraw, token }: { investment: Investment; onWithdraw: () => void; token: string }) {
+  const [showHistory, setShowHistory] = useState(false);
+  const nextCredit = nextCreditLabel(investment);
   const progress =
     investment.status === 'ACTIVE'
       ? Math.min(100, Math.max(0, Number(investment.progressPercent) || 0))
@@ -260,8 +326,19 @@ function InvestmentCard({ investment, onWithdraw }: { investment: Investment; on
       ? 0
       : 100;
   const daysRemaining = Math.max(0, Number(investment.daysRemaining) || 0);
-  const isEarly = investment.status === 'ACTIVE' && investment.earlyWithdrawalAllowed;
-  const showProgress = investment.status !== 'CANCELLED';
+  const isEarly = investment.status === 'ACTIVE' && investment.earlyWithdrawalAllowed && investment.lockInDays > 0;
+  const openEnded = investment.isOpenEnded;
+  const showProgress = investment.status !== 'CANCELLED' && !openEnded;
+  const daily = investment.payoutMode === 'DAILY';
+  const monthlyPlan = daily && investment.creditsPerCycle !== null;
+  const creditedPct =
+    daily && investment.expectedProfit > 0
+      ? Math.min(100, Math.round((investment.profitCredited / investment.expectedProfit) * 100))
+      : 0;
+  const cyclePct =
+    monthlyPlan && investment.creditsPerCycle
+      ? Math.min(100, Math.round((investment.creditsThisCycle / investment.creditsPerCycle) * 100))
+      : 0;
 
   return (
     <div className="p-5 space-y-4">
@@ -270,32 +347,82 @@ function InvestmentCard({ investment, onWithdraw }: { investment: Investment; on
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-sm font-bold text-zinc-950 dark:text-white">{investment.planName}</h3>
             <StatusBadge status={investment.status} kind="investment" />
-            {isEarly && <StatusBadge status="PENDING" label="Early withdrawal allowed" />}
+            {isEarly && <StatusBadge status="PENDING" label="Early exit allowed" />}
+            {investment.status === 'ACTIVE' && investment.isLocked && (
+              <StatusBadge status="PENDING" label={`Locked until ${formatDate(investment.lockInEndsAt)}`} />
+            )}
           </div>
           <div className="text-[11px] text-zinc-500 font-mono mt-0.5">{investment.reference}</div>
         </div>
-        {investment.canRequestWithdrawal && (
-          <button type="button" onClick={onWithdraw} className={accentButtonClass}>
+        {investment.canRequestWithdrawal ? (
+          <button
+            type="button"
+            onClick={onWithdraw}
+            className={accentButtonClass}
+            title={
+              investment.earlyExitFeeApplies
+                ? `Closes this investment before it ends. ${investment.feePercent}% early withdrawal fee applies.`
+                : 'Pays your capital back in full. No fee.'
+            }
+          >
             <Banknote className="w-3.5 h-3.5" />
-            <span>Request withdrawal</span>
+            <span>Withdraw capital</span>
           </button>
-        )}
+        ) : investment.status === 'ACTIVE' ? (
+          <button
+            type="button"
+            disabled
+            title={`Your capital is locked until ${formatDate(investment.lockInEndsAt)}.${
+              investment.maturityDate ? ` It returns to your capital wallet at maturity on ${formatDate(investment.maturityDate)}.` : ''
+            }`}
+            className={`${secondaryButtonClass} opacity-60 cursor-not-allowed`}
+          >
+            <Banknote className="w-3.5 h-3.5" />
+            <span>Capital locked</span>
+          </button>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <Field label="Amount">
+        <Field label="Capital invested">
           <span className="tabular-nums font-semibold">{formatINR(investment.amount)}</span>
         </Field>
-        <Field label="Expected profit">
-          <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">+{formatINR(investment.expectedProfit)}</span>
-          <span className="text-zinc-500 font-normal"> ({formatProfit(investment.profitType, investment.profitValue)})</span>
-        </Field>
-        <Field label="Maturity amount">
-          <span className="tabular-nums font-bold">{formatINR(investment.maturityAmount)}</span>
-        </Field>
+        {daily ? (
+          <Field label="Profit per month">
+            <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">+{formatINR(investment.monthlyProfit)}</span>
+            <span className="text-zinc-500 font-normal">
+              {' '}
+              ({formatProfit(investment.profitType, investment.profitValue, investment.payoutMode, investment.rateBasis)})
+            </span>
+          </Field>
+        ) : (
+          <Field label="Expected profit">
+            <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">+{formatINR(investment.expectedProfit)}</span>
+            <span className="text-zinc-500 font-normal"> ({formatProfit(investment.profitType, investment.profitValue, investment.payoutMode)})</span>
+          </Field>
+        )}
+        {daily ? (
+          <Field label="Profit credited so far">
+            <span className="tabular-nums font-bold text-emerald-600 dark:text-emerald-400">+{formatINR(investment.profitCredited)}</span>
+            {!openEnded && (
+              <span className="text-zinc-500 font-normal"> of {formatINR(investment.expectedProfit)} ({creditedPct}%)</span>
+            )}
+          </Field>
+        ) : (
+          <Field label="Maturity amount">
+            <span className="tabular-nums font-bold">{formatINR(investment.maturityAmount)}</span>
+          </Field>
+        )}
         <Field label="Start date">{formatDate(investment.startDate)}</Field>
-        <Field label="Maturity date">{formatDate(investment.maturityDate)}</Field>
-        <Field label="Period">{formatDuration(investment.durationDays)}</Field>
+        <Field label={openEnded ? 'Term' : 'Maturity date'}>
+          {openEnded ? 'Open-ended · close any time' : formatDate(investment.maturityDate)}
+        </Field>
+        <Field label="Early withdrawal fee">
+          {investment.feePercent}% of capital
+          <span className="block text-[10px] text-zinc-500 font-normal">
+            {openEnded ? 'applies whenever you close the plan' : 'only if closed before maturity; none after'}
+          </span>
+        </Field>
       </div>
 
       {showProgress && (
@@ -309,7 +436,7 @@ function InvestmentCard({ investment, onWithdraw }: { investment: Investment; on
                 : investment.status === 'MATURED'
                 ? 'Matured'
                 : investment.status === 'WITHDRAWAL_REQUESTED'
-                ? 'Matured · withdrawal in progress'
+                ? 'Capital withdrawal in progress'
                 : 'Completed'}
             </span>
             <span className="tabular-nums font-medium">{progress.toFixed(0)}%</span>
@@ -330,24 +457,90 @@ function InvestmentCard({ investment, onWithdraw }: { investment: Investment; on
         </div>
       )}
 
+      {daily && (
+        <div className="rounded-xl bg-emerald-50/60 dark:bg-emerald-500/5 border border-emerald-100 dark:border-emerald-500/20 p-3 space-y-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="text-[11px] text-zinc-700 dark:text-zinc-300">
+              <span className="font-semibold text-emerald-700 dark:text-emerald-400">{formatINR(investment.dailyProfit)}</span>
+              {investment.dailyRatePercent > 0 && investment.rateBasis !== 'PER_DAY' ? ` (${investment.dailyRatePercent}% of capital)` : ''} every
+              working day (Mon–Fri) at {PAYOUT_TIME_LABEL}
+              {' · '}
+              <span className="font-semibold text-emerald-700 dark:text-emerald-400">{formatINR(investment.weeklyProfit)}</span> a week
+              {' · '}
+              {monthlyPlan && investment.creditsPerCycle ? (
+                <>
+                  <span className="tabular-nums">
+                    {investment.creditsThisCycle} of {investment.creditsPerCycle}
+                  </span>{' '}
+                  credits this month ({investment.creditedDays} in total)
+                </>
+              ) : (
+                <>
+                  <span className="tabular-nums">
+                    {investment.creditedDays} of {investment.profitDays}
+                  </span>{' '}
+                  days credited
+                </>
+              )}
+              {investment.status === 'ACTIVE' && !openEnded && <> · capital of {formatINR(investment.amount)} returns at maturity</>}
+            </div>
+            <div className="flex items-center gap-3">
+              {nextCredit && (
+                <span className={`inline-flex items-center gap-1 text-[11px] font-medium ${investment.nextCreditDue ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-600 dark:text-zinc-400'}`}>
+                  <Clock className="w-3 h-3" /> {nextCredit}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowHistory((v) => !v)}
+                className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 hover:underline inline-flex items-center gap-1"
+                aria-expanded={showHistory}
+              >
+                {showHistory ? 'Hide profit history' : 'Profit history'}
+                <ChevronDown className={`w-3 h-3 transition-transform ${showHistory ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+          </div>
+          <div
+            className="h-1 rounded-full bg-white dark:bg-white/[0.06] overflow-hidden"
+            role="progressbar"
+            aria-valuenow={monthlyPlan ? cyclePct : creditedPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={monthlyPlan ? 'Profit credits this month' : 'Profit credited so far'}
+          >
+            <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${monthlyPlan ? cyclePct : creditedPct}%` }} />
+          </div>
+          {showHistory && <ProfitHistory token={token} investment={investment} />}
+        </div>
+      )}
       {investment.status === 'MATURED' && (
         <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
           Matured on {formatDate(investment.maturedAt || investment.maturityDate)}.
-          {investment.canRequestWithdrawal ? ' You can request your withdrawal now.' : ''}
+          {investment.canRequestWithdrawal
+            ? daily
+              ? ' Your daily profit is already in your profit wallet; withdraw your capital now, no fee.'
+              : ' You can request your withdrawal now.'
+            : ''}
         </p>
       )}
       {investment.status === 'WITHDRAWAL_REQUESTED' && (
         <p className="text-[11px] text-amber-700 dark:text-amber-400">
-          Withdrawal requested. Track it under &quot;Withdrawal requests&quot;.
+          Capital withdrawal requested; daily profit has stopped. Track it under &quot;Withdrawal requests&quot;.
         </p>
       )}
       {investment.status === 'COMPLETED' && investment.completedAt && (
-        <p className="text-[11px] text-zinc-500">Completed on {formatDate(investment.completedAt)}.</p>
+        <p className="text-[11px] text-zinc-500">
+          Completed on {formatDate(investment.completedAt)}.
+          {investment.maturedAt && !openEnded
+            ? ' Your capital was returned to your capital wallet at maturity; re-invest it or withdraw it from the Wallet page.'
+            : ''}
+        </p>
       )}
       {investment.status === 'CANCELLED' && (
         <p className="text-[11px] text-zinc-500">
           Cancelled{investment.cancelledAt ? ` on ${formatDate(investment.cancelledAt)}` : ''}
-          {investment.cancelReason ? `: ${investment.cancelReason}` : '.'} The principal was refunded to your wallet.
+          {investment.cancelReason ? `: ${investment.cancelReason}` : '.'} The capital was refunded to your capital wallet.
         </p>
       )}
     </div>
@@ -453,18 +646,27 @@ function WithdrawalCard({
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-sm font-bold text-zinc-950 dark:text-white">{withdrawal.planName}</h3>
+            <h3 className="text-sm font-bold text-zinc-950 dark:text-white">
+              {withdrawal.source === 'WALLET'
+                ? `${BUCKET_LABELS[withdrawal.bucket] || 'Wallet'} withdrawal`
+                : `${withdrawal.planName || 'Investment'} · capital withdrawal`}
+            </h3>
             <StatusBadge status={withdrawal.status} kind="withdrawal" />
-            {withdrawal.isEarly && <StatusBadge status="PENDING" label="Early withdrawal" />}
+            {withdrawal.isEarly && withdrawal.source !== 'WALLET' && <StatusBadge status="PENDING" label="Before maturity" />}
           </div>
           <div className="text-[11px] text-zinc-500 font-mono mt-0.5 break-all">
-            {withdrawal.reference} · {withdrawal.investmentReference}
+            {withdrawal.reference}
+            {withdrawal.investmentReference ? ` · ${withdrawal.investmentReference}` : ''}
           </div>
         </div>
         <div className="sm:text-right shrink-0">
-          <div className="tabular-nums font-bold text-base text-zinc-950 dark:text-white">{formatINR(withdrawal.totalAmount)}</div>
+          <div className="tabular-nums font-bold text-base text-zinc-950 dark:text-white">{formatINR(withdrawal.netAmount)}</div>
           <div className="text-[10px] text-zinc-500 tabular-nums">
-            {formatINR(withdrawal.principalAmount)} principal + {formatINR(withdrawal.profitAmount)} profit
+            {withdrawal.feeAmount > 0
+              ? `${formatINR(withdrawal.totalAmount)} less ${withdrawal.feePercent}% fee (${formatINR(withdrawal.feeAmount)})`
+              : withdrawal.source === 'WALLET'
+              ? `From ${(BUCKET_LABELS[withdrawal.bucket] || 'wallet').toLowerCase()} · no fee`
+              : `${formatINR(withdrawal.principalAmount)} capital + ${formatINR(withdrawal.profitAmount)} profit`}
           </div>
         </div>
       </div>
@@ -501,8 +703,10 @@ function WithdrawalCard({
 
       {withdrawal.status === 'REJECTED' && (
         <Alert>
-          This request was rejected{withdrawal.rejectionReason ? `: ${withdrawal.rejectionReason}` : '.'} The investment
-          remains in your account; contact support if you believe this is a mistake.
+          This request was rejected{withdrawal.rejectionReason ? `: ${withdrawal.rejectionReason}` : '.'}{' '}
+          {withdrawal.source === 'WALLET'
+            ? `${formatINR(withdrawal.totalAmount)} has been returned to your ${(BUCKET_LABELS[withdrawal.bucket] || 'wallet').toLowerCase()}.`
+            : 'The investment stays active and keeps earning; contact support if you believe this is a mistake.'}
         </Alert>
       )}
     </div>
@@ -515,8 +719,8 @@ function WithdrawalCard({
 function availableMethods(details: PayoutDetails | null): PayoutMethod[] {
   if (!details) return [];
   const methods: PayoutMethod[] = [];
+  // Withdrawals are paid to the bank account only
   if (details.hasBankDetails) methods.push('BANK');
-  if (details.hasUpiDetails) methods.push('UPI');
   return methods;
 }
 
@@ -542,15 +746,48 @@ function WithdrawModal({
   const [error, setError] = useState('');
   const [created, setCreated] = useState<Withdrawal | null>(null);
 
-  const isEarly = investment.status === 'ACTIVE';
+  // "Early" only means something for fixed-term plans; open-ended plans are closed whenever the customer likes
+  const isEarly = investment.status === 'ACTIVE' && !investment.isOpenEnded;
   const details = profile.data?.payoutDetails || null;
   const methods = availableMethods(details);
   const preferred = details && methods.includes(details.preferredMethod) ? details.preferredMethod : methods[0] || null;
   const method = chosenMethod && methods.includes(chosenMethod) ? chosenMethod : preferred;
 
-  // Display only: the server decides the final amounts.
+  // Display only: the server decides the final amounts. Daily-profit plans have already credited
+  // their profit to the profit wallet, so the payout is the capital alone. The fee is charged only
+  // when the plan is closed before it ends; matured capital is paid in full.
+  const daily = investment.payoutMode === 'DAILY';
   const principal = investment.amount;
-  const profit = isEarly ? 0 : investment.expectedProfit;
+  const profit = isEarly || daily ? 0 : investment.expectedProfit;
+  const gross = Math.round((principal + profit) * 100) / 100;
+  const feeApplies = investment.earlyExitFeeApplies;
+  const feePercent = feeApplies ? Number(investment.feePercent) || 0 : 0;
+  const fee = Math.round(principal * feePercent) / 100;
+  const net = Math.round((gross - fee) * 100) / 100;
+
+  const amountBreakdown = (
+    <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-white/[0.06] text-xs">
+      <DetailRow label="Capital" value={<span className="tabular-nums font-semibold">{formatINR(principal)}</span>} />
+      {!daily && (
+        <DetailRow
+          label="Profit"
+          value={<span className="tabular-nums font-semibold">{isEarly ? formatINR(0) : `+${formatINR(profit)}`}</span>}
+          tone={isEarly ? 'default' : 'profit'}
+        />
+      )}
+      <DetailRow
+        label={feeApplies ? `Early withdrawal fee (${feePercent}%)` : 'Fee'}
+        value={
+          feeApplies ? (
+            <span className="tabular-nums font-semibold text-rose-600 dark:text-rose-400">-{formatINR(fee)}</span>
+          ) : (
+            <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">None</span>
+          )
+        }
+      />
+      <DetailRow label="You receive" value={<span className="tabular-nums font-bold">{formatINR(net)}</span>} strong />
+    </div>
+  );
 
   const handleSubmit = async () => {
     if (submitting || !method) return;
@@ -589,10 +826,15 @@ function WithdrawModal({
         <div className="text-center space-y-3">
           <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500" aria-hidden="true" />
           <p className="text-sm font-semibold text-zinc-900 dark:text-white">
-            Your withdrawal request for {formatINR(created.totalAmount)} has been submitted.
+            Your capital withdrawal of {formatINR(created.totalAmount)} has been submitted.
           </p>
           <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-white/[0.06] text-xs text-left">
             <DetailRow label="Reference" value={<span className="font-mono">{created.reference}</span>} />
+            <DetailRow
+              label={`Fee (${created.feePercent}%)`}
+              value={<span className="tabular-nums text-rose-600 dark:text-rose-400">-{formatINR(created.feeAmount)}</span>}
+            />
+            <DetailRow label="You receive" value={<span className="tabular-nums font-bold">{formatINR(created.netAmount)}</span>} strong />
             <DetailRow label="Payout method" value={created.payoutMethod === 'UPI' ? 'UPI' : 'Bank transfer'} />
             <DetailRow label="Requested" value={formatDateTime(created.createdAt)} />
             <DetailRow label="Status" value={<StatusBadge status={created.status} kind="withdrawal" />} />
@@ -618,7 +860,7 @@ function WithdrawModal({
   if (stage === 'confirm' && method) {
     return (
       <Modal
-        title="Confirm withdrawal request"
+        title="Confirm capital withdrawal"
         description={`${investment.planName} · ${investment.reference}`}
         onClose={onClose}
         closeDisabled={submitting}
@@ -626,27 +868,27 @@ function WithdrawModal({
         <div className="space-y-4">
           {error && <Alert>{error}</Alert>}
 
-          <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-white/[0.06] text-xs">
-            <DetailRow label="Principal" value={<span className="tabular-nums font-semibold">{formatINR(principal)}</span>} />
-            <DetailRow
-              label="Profit"
-              value={<span className="tabular-nums font-semibold">{isEarly ? formatINR(0) : `+${formatINR(profit)}`}</span>}
-              tone={isEarly ? 'default' : 'profit'}
-            />
-            <DetailRow label="Total payout" value={<span className="tabular-nums font-semibold">{formatINR(principal + profit)}</span>} strong />
-          </div>
+          {amountBreakdown}
+
+          {daily && (
+            <Alert tone="info">
+              {formatINR(investment.profitCredited)} of profit has already been credited to your profit wallet day by
+              day and stays there. This request closes the investment and pays out your capital; daily profit on it stops
+              now.
+            </Alert>
+          )}
 
           {destinationSummary}
 
-          {isEarly && (
+          {isEarly && !daily && (
             <Alert tone="warning">
-              Early withdrawal: only the principal of {formatINR(principal)} is paid unless the admin sets a profit
+              Early withdrawal: only the capital of {formatINR(principal)} is paid unless the admin sets a profit
               amount on approval. The expected profit of {formatINR(investment.expectedProfit)} is forfeited.
             </Alert>
           )}
 
           <p className="text-[11px] text-zinc-500 leading-relaxed">
-            By confirming, you ask MoonTech to pay the amount above to the payout details shown. The request cannot be
+            By confirming, you ask MoonTech to pay {formatINR(net)} to the payout details shown. The request cannot be
             edited once submitted; an admin reviews it before payment.
           </p>
 
@@ -675,25 +917,25 @@ function WithdrawModal({
 
   return (
     <Modal
-      title="Request withdrawal"
+      title="Withdraw capital"
       description={`${investment.planName} · ${investment.reference}`}
       onClose={onClose}
     >
       <div className="space-y-4">
-        <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-white/[0.06] text-xs">
-          <DetailRow label="Principal" value={<span className="tabular-nums font-semibold">{formatINR(principal)}</span>} />
-          <DetailRow
-            label="Profit"
-            value={<span className="tabular-nums font-semibold">{isEarly ? formatINR(0) : `+${formatINR(profit)}`}</span>}
-            tone={isEarly ? 'default' : 'profit'}
-          />
-          <DetailRow label="Total payout" value={<span className="tabular-nums font-semibold">{formatINR(principal + profit)}</span>} strong />
-        </div>
+        {amountBreakdown}
 
-        {isEarly && (
+        {daily && (
+          <Alert tone="info">
+            Your profit on this plan is credited to your profit wallet every working day ({formatINR(investment.profitCredited)} so
+            far) and stays there. Closing the investment pays back your capital
+            {feeApplies ? ` less the ${feePercent}% early withdrawal fee` : ' in full'}, and daily profit on it stops.
+          </Alert>
+        )}
+
+        {isEarly && !daily && (
           <Alert tone="warning">
             This investment has not matured yet (maturity date {formatDate(investment.maturityDate)}). For an early
-            withdrawal only the principal is paid, unless the admin decides otherwise when approving the request.
+            withdrawal only the capital is paid, unless the admin decides otherwise when approving the request.
           </Alert>
         )}
 
@@ -704,11 +946,10 @@ function WithdrawModal({
         ) : methods.length === 0 ? (
           <div className="space-y-3">
             <Alert tone="warning">
-              You have not added any bank or UPI details yet. Add your payout details so we know where to send your
-              money.
+              You have not added your bank account yet. Add it in your profile so we know where to send your money.
             </Alert>
             <Link href="/profile#payout-details" className={`${accentButtonClass} w-full`}>
-              <span>Add bank / UPI details</span>
+              <span>Add bank account details</span>
               <ArrowRight className="w-3 h-3" />
             </Link>
           </div>

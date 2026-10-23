@@ -15,12 +15,13 @@ interface AddManualKycModalProps {
   preselectedCustomerName?: string;
 }
 
-type DocKey = 'passbook' | 'pan' | 'aadhaar';
+type DocKey = 'passbook' | 'pan' | 'aadhaar' | 'aadhaarBack';
 
 const DOCUMENTS: Array<{ key: DocKey; label: string; field: string }> = [
   { key: 'passbook', label: 'Bank passbook / statement', field: 'passbookDocument' },
   { key: 'pan', label: 'PAN card', field: 'panDocument' },
-  { key: 'aadhaar', label: 'Aadhaar card', field: 'aadhaarDocument' },
+  { key: 'aadhaar', label: 'Aadhaar card (front)', field: 'aadhaarDocument' },
+  { key: 'aadhaarBack', label: 'Aadhaar card (back)', field: 'aadhaarBackDocument' },
 ];
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
@@ -52,7 +53,7 @@ export const AddManualKycModal: React.FC<AddManualKycModalProps> = ({
   const formId = useId();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [status, setStatus] = useState<KycStatus.PENDING | KycStatus.VERIFIED>(KycStatus.VERIFIED);
-  const [files, setFiles] = useState<Record<DocKey, File | null>>({ passbook: null, pan: null, aadhaar: null });
+  const [files, setFiles] = useState<Record<DocKey, File | null>>({ passbook: null, pan: null, aadhaar: null, aadhaarBack: null });
   const [errors, setErrors] = useState<FormErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -69,7 +70,7 @@ export const AddManualKycModal: React.FC<AddManualKycModalProps> = ({
     if (isOpen) {
       setForm({ ...EMPTY_FORM, customerId: preselectedCustomerId ? String(preselectedCustomerId) : '' });
       setStatus(KycStatus.VERIFIED);
-      setFiles({ passbook: null, pan: null, aadhaar: null });
+      setFiles({ passbook: null, pan: null, aadhaar: null, aadhaarBack: null });
       setErrors({});
       setFormError(null);
     }
@@ -313,7 +314,7 @@ export const AddManualKycModal: React.FC<AddManualKycModalProps> = ({
             Document uploads <span className="text-slate-400 font-medium normal-case tracking-normal">(Optional)</span>
           </h4>
           <p className="text-[10px] text-slate-400 mb-3">JPEG, PNG, WEBP or PDF, up to 5MB each.</p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {DOCUMENTS.map((doc) => {
               const file = files[doc.key];
               const inputId = `${formId}-file-${doc.key}`;

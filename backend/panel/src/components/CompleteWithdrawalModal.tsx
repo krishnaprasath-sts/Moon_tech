@@ -85,7 +85,7 @@ export const CompleteWithdrawalModal: React.FC<CompleteWithdrawalModalProps> = (
     try {
       await completeWithdrawal({ id: withdrawal.id, formData });
       toast.success(
-        `${withdrawal.reference} marked as paid. ${formatINR(withdrawal.totalAmount)} recorded as withdrawn.`,
+        `${withdrawal.reference} marked as paid. ${formatINR(withdrawal.netAmount)} recorded as paid out.`,
         'Withdrawal completed'
       );
       onSuccess?.();
@@ -133,7 +133,12 @@ export const CompleteWithdrawalModal: React.FC<CompleteWithdrawalModalProps> = (
 
         {withdrawal && (
           <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-            Confirm that <strong className="text-slate-900 dark:text-white">{formatINR(withdrawal.totalAmount)}</strong>{' '}
+            Confirm that <strong className="text-slate-900 dark:text-white">{formatINR(withdrawal.netAmount)}</strong>{' '}
+            {Number(withdrawal.feeAmount) > 0 && (
+              <span className="text-slate-500">
+                ({formatINR(withdrawal.totalAmount)} less the {withdrawal.feePercent}% fee of {formatINR(withdrawal.feeAmount)})
+              </span>
+            )}{' '}
             has been paid to{' '}
             <strong className="text-slate-900 dark:text-white">
               {withdrawal.customerName || withdrawal.customerEmail || 'the customer'}

@@ -1,9 +1,11 @@
 import { Op } from 'sequelize';
-import { sequelize, Deposit, User, CustomerProfile } from '../models/index.js';
+import { sequelize, Deposit, User, CustomerProfile, KycProfile } from '../models/index.js';
 import {
+  DepositMethod,
   DepositStatus,
   WalletTxnType,
   WalletTxnDirection,
+  WalletBucket,
   NotificationType,
   UserRole,
   UserStatus,
@@ -36,6 +38,7 @@ function serialize(deposit: Deposit) {
     reference: deposit.reference,
     userId: deposit.user_id,
     amount: deposit.amount,
+    paymentMethod: deposit.payment_method || DepositMethod.UPI,
     upiTransactionId: deposit.upi_transaction_id,
     hasReceipt: Boolean(deposit.receipt_file),
     status: deposit.status,
@@ -80,7 +83,11 @@ export class DepositService {
     meta: RequestMeta = {}
   ) {
     if (!receipt) {
-      throw new BadRequestError('Payment receipt is required. Upload a screenshot or PDF of the UPI payment.');
+      throw new BadRequestError('Payment receipt is required. Upload a screenshot or PDF of the payment.');
+    }
+    const method = input.paymentMethod || DepositMethod.BANK_TRANSFER;
+    if (method !== DepositMethod.BANK_TRANSFER) {
+      throw new BadRequestError('UPI payments are not accepted. Please pay by bank transfer.');
     }
 
     const user = await User.findByPk(userId);
@@ -103,6 +110,9 @@ export class DepositService {
     if (amountPaise > toPaise(settings.walletMaxTopup)) {
       throw new BadRequestError(`Maximum wallet top-up is ${formatInr(settings.walletMaxTopup)}`);
     }
+    if (method === DepositMethod.BANK_TRANSFER && !SettingsService.bankTransferEnabled(settings)) {
+      throw new BadRequestError('Bank transfer details have not been configured yet. Please try again later.');
+    }
 
     const duplicate = await Deposit.findOne({
       where: {
@@ -112,7 +122,7 @@ export class DepositService {
     });
     if (duplicate) {
       throw new ConflictError(
-        `UPI transaction ID ${input.upiTransactionId} has already been submitted (${duplicate.reference}).`
+        `Transaction reference ${input.upiTransactionId} has already been submitted (${duplicate.reference}).`
       );
     }
 
@@ -122,17 +132,19 @@ export class DepositService {
       reference: generateReference('DEP'),
       user_id: userId,
       amount: input.amount,
+      payment_method: method,
       upi_transaction_id: input.upiTransactionId,
       receipt_file: saved.fileName,
       status: DepositStatus.PENDING,
     });
+    const methodLabel = method === DepositMethod.BANK_TRANSFER ? 'bank transfer' : 'UPI payment';
 
     await ActivityLogService.log({
       userId,
       action: 'DEPOSIT_SUBMITTED',
       entity: 'DEPOSIT',
       entityId: deposit.id,
-      description: `User #${userId} submitted UPI payment of ${formatInr(input.amount)} (${deposit.reference}, UTR ${input.upiTransactionId})`,
+      description: `User #${userId} submitted ${methodLabel} of ${formatInr(input.amount)} (${deposit.reference}, ref ${input.upiTransactionId})`,
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
     });
@@ -233,8 +245,56 @@ export class DepositService {
       throw new NotFoundError('Payment submission not found');
     }
 
-    const walletBalance = await WalletService.getBalance(deposit.user_id);
-    return { ...serializeForAdmin(deposit), walletBalance };
+    const [walletBalance, sameUtr, history, kyc] = await Promise.all([
+      WalletService.getBalance(deposit.user_id),
+      // Every other submission that quotes the same UPI transaction ID (any customer, any status)
+      Deposit.findAll({
+        where: { upi_transaction_id: deposit.upi_transaction_id, id: { [Op.ne]: deposit.id } },
+        include: adminIncludes,
+        order: [['created_at', 'DESC']],
+        limit: 10,
+      }),
+      Deposit.findAll({
+        attributes: ['status', [sequelize.fn('COUNT', sequelize.col('id')), 'count']],
+        where: { user_id: deposit.user_id, id: { [Op.ne]: deposit.id } },
+        group: ['status'],
+        raw: true,
+      }) as Promise<unknown> as Promise<Array<{ status: DepositStatus; count: string | number }>>,
+      KycProfile.findOne({ where: { user_id: deposit.user_id }, attributes: ['kyc_status', 'account_holder_name'] }),
+    ]);
+
+    const counts = { approved: 0, rejected: 0, pending: 0 };
+    for (const row of history) {
+      const n = Number(row.count) || 0;
+      if (row.status === DepositStatus.APPROVED) counts.approved = n;
+      else if (row.status === DepositStatus.REJECTED) counts.rejected = n;
+      else if (row.status === DepositStatus.PENDING) counts.pending = n;
+    }
+
+    const utrAlreadyCredited = sameUtr.some((d) => d.status === DepositStatus.APPROVED);
+
+    return {
+      ...serializeForAdmin(deposit),
+      walletBalance,
+      // Manual verification aids: everything a reviewer should glance at before crediting
+      verification: {
+        utrAlreadyCredited,
+        utrMatches: sameUtr.map((d) => ({
+          id: d.id,
+          reference: d.reference,
+          status: d.status,
+          amount: d.amount,
+          customerName: (d as any).user?.profile?.full_name || 'N/A',
+          customerEmail: (d as any).user?.email || 'N/A',
+          sameCustomer: d.user_id === deposit.user_id,
+          createdAt: toIso(d.created_at),
+        })),
+        customerKycStatus: kyc?.kyc_status || null,
+        kycAccountHolderName: kyc?.account_holder_name || null,
+        previousDeposits: counts,
+        isFirstDeposit: counts.approved === 0 && counts.rejected === 0 && counts.pending === 0,
+      },
+    };
   }
 
   /**
@@ -274,8 +334,9 @@ export class DepositService {
           userId: deposit.user_id,
           type: WalletTxnType.DEPOSIT,
           direction: WalletTxnDirection.CREDIT,
+          bucket: WalletBucket.CAPITAL,
           amountPaise: toPaise(deposit.amount),
-          description: `Wallet top-up via UPI (${deposit.reference}, UTR ${deposit.upi_transaction_id})`,
+          description: `Capital top-up via ${deposit.payment_method === DepositMethod.BANK_TRANSFER ? 'bank transfer' : 'UPI'} (${deposit.reference}, ref ${deposit.upi_transaction_id})`,
           relatedEntity: 'DEPOSIT',
           relatedId: deposit.id,
           createdBy: adminId,
@@ -310,9 +371,9 @@ export class DepositService {
       userId: deposit.user_id,
       type: NotificationType.PAYMENT_VERIFIED,
       title: 'Payment verified',
-      message: `Your payment of ${formatInr(deposit.amount)} (${deposit.reference}) was verified and added to your wallet. New balance: ${formatInr(
+      message: `Your payment of ${formatInr(deposit.amount)} (${deposit.reference}) was verified and added to your capital wallet. Available capital: ${formatInr(
         txn.balance_after
-      )}.`,
+      )}. Invest it in a plan to start earning daily profit.`,
       relatedEntity: 'DEPOSIT',
       relatedId: deposit.id,
     });

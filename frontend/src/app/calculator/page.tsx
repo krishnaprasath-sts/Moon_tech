@@ -3,8 +3,17 @@ import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { EarningCalculator } from '@/components/calculator/EarningCalculator';
 import { FloatingSupport } from '@/components/layout/FloatingSupport';
+import { RequireAuth } from '@/components/layout/RequireAuth';
 
 export default function CalculatorPage() {
+  return (
+    <RequireAuth message="Loading calculator...">
+      <CalculatorContent />
+    </RequireAuth>
+  );
+}
+
+function CalculatorContent() {
   return (
     <div className="min-h-screen bg-[var(--bg-base)] text-[var(--text-primary)] flex flex-col justify-between selection:bg-blue-600 selection:text-white transition-colors duration-200">
       <Navbar />

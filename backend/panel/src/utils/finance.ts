@@ -108,3 +108,17 @@ export const downloadBlob = (blob: Blob, filename: string) => {
 
 export const joinParts = (parts: Array<string | null | undefined>, separator = ', '): string =>
   parts.map((p) => (p || '').trim()).filter(Boolean).join(separator);
+
+/**
+ * Field-level messages from a 422 validation response, keyed by field name, so forms can show
+ * each server error next to the input it belongs to. Empty when the error has no field details.
+ */
+export const getApiFieldErrors = (err: unknown): Record<string, string> => {
+  const data = (err as ApiErrorLike)?.response?.data;
+  if (!data || data instanceof Blob || !Array.isArray(data.errors)) return {};
+  const out: Record<string, string> = {};
+  for (const e of data.errors) {
+    if (e?.field && e?.message && !out[e.field]) out[e.field] = e.message;
+  }
+  return out;
+};

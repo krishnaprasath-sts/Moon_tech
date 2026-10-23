@@ -29,6 +29,17 @@ export class AuthController {
 
       const result = await AuthService.login(req.body, ipAddress, userAgent);
 
+      // Customers get a code by email first; the session is issued by verifyLoginOtp
+      if ('otpRequired' in result) {
+        sendResponse({
+          res,
+          statusCode: 200,
+          message: `A 6-digit verification code has been sent to ${result.email}. It is valid for 2 minutes.`,
+          data: result,
+        });
+        return;
+      }
+
       // Set auth cookie
       res.cookie('token', result.accessToken, {
         httpOnly: true,
@@ -41,6 +52,41 @@ export class AuthController {
         res,
         statusCode: 200,
         message: 'Logged in successfully',
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async verifyLoginOtp(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const ipAddress = req.ip || req.socket.remoteAddress;
+      const userAgent = req.headers['user-agent'];
+      const result = await AuthService.verifyLoginOtp(req.body, ipAddress, userAgent);
+
+      res.cookie('token', result.accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 24 * 60 * 60 * 1000,
+      });
+
+      sendResponse({ res, statusCode: 200, message: 'Logged in successfully', data: result });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async resendLoginOtp(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const ipAddress = req.ip || req.socket.remoteAddress;
+      const userAgent = req.headers['user-agent'];
+      const result = await AuthService.resendLoginOtp(req.body, ipAddress, userAgent);
+      sendResponse({
+        res,
+        statusCode: 200,
+        message: `A new verification code has been sent to ${result.email}. It is valid for 2 minutes.`,
         data: result,
       });
     } catch (error) {

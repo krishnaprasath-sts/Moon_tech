@@ -7,6 +7,8 @@ export interface KycProfileAttributes {
   user_id: number;
   kyc_status: KycStatus;
   pan_number_encrypted?: string | null;
+  /** Keyed one-way fingerprint of the PAN, used to spot the same PAN on another account */
+  pan_hash?: string | null;
   pan_last4?: string | null;
   aadhaar_reference?: string | null;
   aadhaar_last4?: string | null;
@@ -17,6 +19,8 @@ export interface KycProfileAttributes {
   passbook_document?: string | null;
   pan_document?: string | null;
   aadhaar_document?: string | null;
+  /** Back side of the Aadhaar card (the front, or an e-Aadhaar PDF, is aadhaar_document) */
+  aadhaar_back_document?: string | null;
   submitted_at?: Date | null;
   reviewed_at?: Date | null;
   reviewed_by?: number | null;
@@ -31,6 +35,7 @@ export interface KycProfileCreationAttributes
     | 'id'
     | 'kyc_status'
     | 'pan_number_encrypted'
+    | 'pan_hash'
     | 'pan_last4'
     | 'aadhaar_reference'
     | 'aadhaar_last4'
@@ -41,6 +46,7 @@ export interface KycProfileCreationAttributes
     | 'passbook_document'
     | 'pan_document'
     | 'aadhaar_document'
+    | 'aadhaar_back_document'
     | 'submitted_at'
     | 'reviewed_at'
     | 'reviewed_by'
@@ -57,6 +63,7 @@ export class KycProfile
   declare public user_id: number;
   declare public kyc_status: KycStatus;
   declare public pan_number_encrypted: string | null;
+  declare public pan_hash: string | null;
   declare public pan_last4: string | null;
   declare public aadhaar_reference: string | null;
   declare public aadhaar_last4: string | null;
@@ -67,6 +74,7 @@ export class KycProfile
   declare public passbook_document: string | null;
   declare public pan_document: string | null;
   declare public aadhaar_document: string | null;
+  declare public aadhaar_back_document: string | null;
   declare public submitted_at: Date | null;
   declare public reviewed_at: Date | null;
   declare public reviewed_by: number | null;
@@ -98,6 +106,10 @@ KycProfile.init(
     },
     pan_number_encrypted: {
       type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    pan_hash: {
+      type: DataTypes.STRING(64),
       allowNull: true,
     },
     pan_last4: {
@@ -137,6 +149,10 @@ KycProfile.init(
       allowNull: true,
     },
     aadhaar_document: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
+    aadhaar_back_document: {
       type: DataTypes.STRING(255),
       allowNull: true,
     },

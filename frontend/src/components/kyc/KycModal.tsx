@@ -19,8 +19,9 @@ import {
 import { api, getErrorMessage } from '@/lib/api';
 import { formatFileSize, validateReceiptFile } from '@/lib/format';
 import { Spinner } from '@/components/ui/primitives';
+import { useBackToClose } from '@/lib/useBackToClose';
 
-type DocumentKey = 'pan' | 'aadhaar' | 'passbook';
+type DocumentKey = 'pan' | 'aadhaar' | 'aadhaarBack' | 'passbook';
 
 interface KycModalProps {
   isOpen: boolean;
@@ -76,27 +77,27 @@ function DocumentCard({
 
   return (
     <div
-      className={`p-4 rounded-2xl border transition-all ${
+      className={`p-4 rounded-2xl border transition-all min-w-0 ${
         file
           ? 'bg-blue-600/5 dark:bg-blue-600/10 border-blue-600/30'
           : 'bg-white dark:bg-zinc-900 border-dashed border-zinc-300 dark:border-white/15 hover:border-blue-600 dark:hover:border-blue-500'
       }`}
     >
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-bold text-zinc-900 dark:text-white">{title}</span>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <span className="text-xs font-bold text-zinc-900 dark:text-white truncate">{title}</span>
         {file ? (
           <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 bg-blue-600/10 px-2 py-0.5 rounded-md">
             <Check className="w-3 h-3" /> Ready
           </span>
         ) : (
-          <span className="text-[10px] text-blue-600 font-bold">* Required</span>
+          <span className="text-[10px] text-blue-600 font-bold shrink-0">* Required</span>
         )}
       </div>
 
       {file ? (
         <div className="space-y-3">
-          <div className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800/70 flex items-center justify-between gap-2">
-            <div className="truncate text-xs font-medium text-zinc-900 dark:text-white" title={file.name}>
+          <div className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800/70 flex items-center justify-between gap-2 min-w-0">
+            <div className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-900 dark:text-white" title={file.name}>
               {file.name}
             </div>
             <span className="text-[10px] text-zinc-500 shrink-0 font-mono">{formatFileSize(file.size)}</span>
@@ -118,10 +119,10 @@ function DocumentCard({
           </div>
         </div>
       ) : (
-        <label className="block text-center py-4 cursor-pointer rounded-xl focus-within:outline-2 focus-within:outline-blue-600">
+        <label className="block text-center py-4 px-2 cursor-pointer rounded-xl focus-within:outline-2 focus-within:outline-blue-600">
           <UploadCloud className="w-8 h-8 mx-auto mb-2 text-zinc-400 transition" />
           <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 block">{uploadLabel}</span>
-          <span className="text-[10px] text-zinc-400 block mt-0.5">{hint}</span>
+          <span className="text-[10px] text-zinc-400 block mt-0.5 break-words">{hint}</span>
           {fileInput}
         </label>
       )}
@@ -155,10 +156,12 @@ export function KycModal({
   const [accountNumber, setAccountNumber] = useState('');
   const [editedHolderName, setEditedHolderName] = useState<string | null>(null);
   const [ifsc, setIfsc] = useState('');
-  const [files, setFiles] = useState<Record<DocumentKey, File | null>>({ pan: null, aadhaar: null, passbook: null });
+  const [files, setFiles] = useState<Record<DocumentKey, File | null>>({ pan: null, aadhaar: null, aadhaarBack: null, passbook: null });
 
   const panelRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Phone back button closes the dialog instead of leaving the dashboard
+  const { requestClose } = useBackToClose(isOpen, onClose);
   useEffect(() => {
     return () => {
       if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -174,7 +177,8 @@ export function KycModal({
     }
     setError('');
     setSuccess('');
-    onClose();
+    requestClose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- requestClose is stable per open
   }, [submitting, onClose]);
 
   // Escape closes, body scroll is locked and focus moves into the dialog while open
@@ -254,8 +258,8 @@ export function KycModal({
       return;
     }
 
-    if (!files.pan || !files.aadhaar || !files.passbook) {
-      setError('Please upload all 3 documents: PAN card, Aadhaar card and bank passbook / statement.');
+    if (!files.pan || !files.aadhaar || !files.aadhaarBack || !files.passbook) {
+      setError('Please upload all 4 documents: PAN card, Aadhaar front, Aadhaar back and bank passbook / statement.');
       return;
     }
 
@@ -270,6 +274,7 @@ export function KycModal({
 
       formData.append('panDocument', files.pan);
       formData.append('aadhaarDocument', files.aadhaar);
+      formData.append('aadhaarBackDocument', files.aadhaarBack);
       formData.append('passbookDocument', files.passbook);
 
       await api.submitKyc(token, formData);
@@ -280,7 +285,7 @@ export function KycModal({
       closeTimer.current = setTimeout(() => {
         closeTimer.current = null;
         setSuccess('');
-        onClose();
+        requestClose();
       }, 3000);
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Unable to submit your KYC details. Please try again.'));
@@ -290,23 +295,26 @@ export function KycModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/75 backdrop-blur-md animate-fade-in overflow-y-auto"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) handleClose();
-      }}
-    >
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 animate-overlay-in">
+      {/* The whole dialog scrolls with the page: no nested scroll area, which some phone
+          browsers paint unreliably. The footer stays pinned while the form scrolls. */}
+      <div
+        className="min-h-full flex items-start sm:items-center justify-center p-3 sm:p-6"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) handleClose();
+        }}
+      >
       <div
         ref={panelRef}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="kyc-modal-title"
-        className="w-full max-w-4xl rounded-2xl sm:rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 shadow-2xl relative my-auto max-h-[92vh] flex flex-col overflow-hidden focus:outline-none"
+        className="w-full max-w-4xl rounded-2xl sm:rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 shadow-2xl relative focus:outline-none"
       >
 
         {/* Header */}
-        <div className="px-5 sm:px-8 py-5 border-b border-zinc-200 dark:border-white/10 flex items-start justify-between gap-4 bg-zinc-50/70 dark:bg-zinc-950/40">
+        <div className="px-5 sm:px-8 py-5 rounded-t-2xl sm:rounded-t-3xl border-b border-zinc-200 dark:border-white/10 flex items-start justify-between gap-4 bg-zinc-50/70 dark:bg-zinc-950/40">
           <div className="flex items-start gap-3.5 min-w-0">
             <div className="w-10 h-10 rounded-2xl bg-blue-600/10 border border-blue-600/20 text-blue-600 dark:text-blue-500 flex items-center justify-center shrink-0 mt-0.5">
               <ShieldCheck className="w-5 h-5" />
@@ -347,7 +355,7 @@ export function KycModal({
         </div>
 
         {/* Scrollable Form Body */}
-        <div className="p-5 sm:p-8 overflow-y-auto space-y-6 flex-1">
+        <div className="p-5 sm:p-8 space-y-6">
 
           {success && (
             <div role="status" className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 text-xs sm:text-sm flex items-start gap-3 animate-fade-in">
@@ -463,9 +471,9 @@ export function KycModal({
               {/* Section 1: National Identity */}
               <fieldset disabled={submitting || Boolean(success)} className="p-5 sm:p-6 rounded-2xl bg-zinc-50/80 dark:bg-zinc-950/60 border border-zinc-200 dark:border-white/[0.08] space-y-4 min-w-0">
                 <legend className="sr-only">Identity details</legend>
-                <div className="flex items-center justify-between border-b border-zinc-200 dark:border-white/10 pb-3">
-                  <div className="flex items-center gap-2">
-                    <CreditCard className="w-4 h-4 text-blue-600" />
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-zinc-200 dark:border-white/10 pb-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <CreditCard className="w-4 h-4 text-blue-600 shrink-0" />
                     <h4 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
                       1. Identity details
                     </h4>
@@ -614,18 +622,20 @@ export function KycModal({
               </fieldset>
 
               {/* Section 3: Document Uploads */}
-              <div className="p-5 sm:p-6 rounded-2xl bg-zinc-50/80 dark:bg-zinc-950/60 border border-zinc-200 dark:border-white/[0.08] space-y-4">
-                <div className="flex items-center justify-between gap-3 border-b border-zinc-200 dark:border-white/10 pb-3">
+              <div className="p-5 sm:p-6 rounded-2xl bg-zinc-50/80 dark:bg-zinc-950/60 border border-zinc-200 dark:border-white/[0.08] space-y-4 min-w-0">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-x-3 gap-y-1 border-b border-zinc-200 dark:border-white/10 pb-3">
                   <div className="flex items-center gap-2 min-w-0">
                     <FileText className="w-4 h-4 text-blue-600 shrink-0" />
                     <h4 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
                       3. Documents
                     </h4>
                   </div>
-                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium shrink-0">JPEG, PNG, WEBP or PDF, up to 5 MB each</span>
+                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium sm:text-right">
+                    JPEG, PNG, WEBP or PDF, up to 5 MB each
+                  </span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <DocumentCard
                     title="PAN card"
                     file={files.pan}
@@ -636,13 +646,22 @@ export function KycModal({
                     onRemove={() => setFiles((current) => ({ ...current, pan: null }))}
                   />
                   <DocumentCard
-                    title="Aadhaar card"
+                    title="Aadhaar card - front"
                     file={files.aadhaar}
                     uploadLabel="Click to upload"
-                    hint="Front and back, or e-Aadhaar PDF"
+                    hint="Side with your photo and Aadhaar number"
                     disabled={submitting || Boolean(success)}
                     onSelect={(file) => handleFileSelect('aadhaar', file)}
                     onRemove={() => setFiles((current) => ({ ...current, aadhaar: null }))}
+                  />
+                  <DocumentCard
+                    title="Aadhaar card - back"
+                    file={files.aadhaarBack}
+                    uploadLabel="Click to upload"
+                    hint="Side with your address"
+                    disabled={submitting || Boolean(success)}
+                    onSelect={(file) => handleFileSelect('aadhaarBack', file)}
+                    onRemove={() => setFiles((current) => ({ ...current, aadhaarBack: null }))}
                   />
                   <DocumentCard
                     title="Bank passbook"
@@ -663,9 +682,9 @@ export function KycModal({
 
         {/* Footer Bar */}
         {(showForm || success) && (
-          <div className="px-5 sm:px-8 py-4 bg-zinc-50/90 dark:bg-zinc-950/80 border-t border-zinc-200 dark:border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 text-xs">
-              <Lock className="w-4 h-4 text-blue-600" />
+          <div className="sticky bottom-0 px-5 sm:px-8 py-4 rounded-b-2xl sm:rounded-b-3xl bg-zinc-50 dark:bg-zinc-950 border-t border-zinc-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+            <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 text-[11px] sm:text-xs min-w-0">
+              <Lock className="w-4 h-4 text-blue-600 shrink-0" />
               <span>Identity verification in line with AML / KYC guidelines.</span>
             </div>
 
@@ -693,6 +712,7 @@ export function KycModal({
           </div>
         )}
 
+      </div>
       </div>
     </div>
   );

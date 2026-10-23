@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { runHealthChecks } from '../utils/healthChecks.js';
 import authRoutes from './authRoutes.js';
 import kycRoutes, { adminKycRouter } from './kycRoutes.js';
 import customerRoutes from './customerRoutes.js';
@@ -14,17 +15,20 @@ import {
   investmentRouter,
   withdrawalRouter,
   notificationRouter,
+  publicRouter,
   adminFinanceRouter,
 } from './financeRoutes.js';
 
 const apiRouter = Router();
 
-// Health check
-apiRouter.get('/health', (_req, res) => {
-  res.json({
-    status: 'online',
+// Health check: 200 when every dependency works, 503 with the failing check named otherwise
+apiRouter.get('/health', async (_req, res) => {
+  const report = await runHealthChecks();
+  res.status(report.ok ? 200 : 503).json({
+    status: report.ok ? 'online' : 'degraded',
     system: 'Moon Tech Solutions Stock Market Investment Platform API',
     timestamp: new Date().toISOString(),
+    checks: report.checks,
   });
 });
 
@@ -53,6 +57,7 @@ apiRouter.use('/investment-plans', investmentPlanRouter);
 apiRouter.use('/investments', investmentRouter);
 apiRouter.use('/withdrawals', withdrawalRouter);
 apiRouter.use('/notifications', notificationRouter);
+apiRouter.use('/public', publicRouter);
 
 // Investment platform: admin routes (mounted last so existing /admin routers match first)
 apiRouter.use('/admin', adminFinanceRouter);

@@ -36,12 +36,20 @@ if (config.trustProxy) {
   app.set('trust proxy', config.trustProxy);
 }
 
+// In development, also accept the front-end / admin dev servers when opened from another
+// device on the local network (e.g. http://192.168.1.20:3000). Never enabled in production.
+const privateLanDevOrigin =
+  /^http:\/\/(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}):(?:3000|5173)$/;
+
+const isAllowedOrigin = (origin: string): boolean =>
+  allowedOrigins.has(origin) || (config.isDev && privateLanDevOrigin.test(origin));
+
 app.use(
   cors({
     origin: (origin, callback) => {
       // Requests without an Origin header (curl, mobile apps, same-origin) are allowed;
       // browsers are only allowed from the configured front-end origins.
-      if (!origin || allowedOrigins.has(origin)) {
+      if (!origin || isAllowedOrigin(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`Origin ${origin} is not allowed by CORS`));

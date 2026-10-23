@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useEffect, useId, useRef } from 'react';
-import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Info, Loader2, RefreshCw, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Info, Loader2, RefreshCw, X } from 'lucide-react';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { humanize } from '@/lib/format';
+import { useBackToClose } from '@/lib/useBackToClose';
 import type { PageMeta } from '@/lib/api';
 
 // ---------------------------------------------------------------------------
@@ -265,6 +266,22 @@ export function StatusBadge({ status, label, kind }: { status: string; label?: s
 // ---------------------------------------------------------------------------
 // Pagination
 // ---------------------------------------------------------------------------
+function getPaginationRange(currentPage: number, totalPages: number): (number | 'ellipsis')[] {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+
+  if (currentPage <= 4) {
+    return [1, 2, 3, 4, 5, 'ellipsis', totalPages];
+  }
+
+  if (currentPage >= totalPages - 3) {
+    return [1, 'ellipsis', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+  }
+
+  return [1, 'ellipsis', currentPage - 1, currentPage, currentPage + 1, 'ellipsis', totalPages];
+}
+
 export function Pagination({
   meta,
   onPageChange,
@@ -274,43 +291,133 @@ export function Pagination({
   onPageChange: (page: number) => void;
   disabled?: boolean;
 }) {
-  if (meta.total === 0) return null;
-  const first = (meta.page - 1) * meta.limit + 1;
-  const last = Math.min(meta.page * meta.limit, meta.total);
-  const buttonClass =
-    'inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition font-medium';
+  if (!meta || meta.total === 0) return null;
+
+  const limit = Math.max(1, Number(meta.limit) || 10);
+  const total = Number(meta.total) || 0;
+  const totalPages = Math.max(1, Number(meta.totalPages) || Math.ceil(total / limit));
+  const page = Math.min(Math.max(1, Number(meta.page) || 1), totalPages);
+
+  const first = Math.min((page - 1) * limit + 1, total);
+  const last = Math.min(page * limit, total);
+  const pages = getPaginationRange(page, totalPages);
+
+  const handlePageClick = (p: number) => {
+    if (disabled || p === page || p < 1 || p > totalPages) return;
+    onPageChange(p);
+  };
+
+  const navButtonClass =
+    'inline-flex items-center justify-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:pointer-events-none transition text-xs font-semibold cursor-pointer select-none';
 
   return (
     <nav
-      aria-label="Pagination"
-      className="px-5 py-3 border-t border-zinc-100 dark:border-white/[0.06] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-zinc-500"
+      aria-label="Pagination Navigation"
+      className="px-4 sm:px-6 py-3.5 border-t border-zinc-100 dark:border-white/[0.06] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-zinc-500"
     >
-      <span>
-        Showing {first}–{last} of {meta.total}
-      </span>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className={buttonClass}
-          disabled={disabled || meta.page <= 1}
-          onClick={() => onPageChange(meta.page - 1)}
-        >
-          <ChevronLeft className="w-3.5 h-3.5" />
-          <span>Previous</span>
-        </button>
-        <span className="font-mono" aria-current="page">
-          {meta.page} / {meta.totalPages}
-        </span>
-        <button
-          type="button"
-          className={buttonClass}
-          disabled={disabled || meta.page >= meta.totalPages}
-          onClick={() => onPageChange(meta.page + 1)}
-        >
-          <span>Next</span>
-          <ChevronRight className="w-3.5 h-3.5" />
-        </button>
+      <div className="text-zinc-600 dark:text-zinc-400">
+        Showing <span className="font-semibold text-zinc-900 dark:text-white tabular-nums">{first}</span>–
+        <span className="font-semibold text-zinc-900 dark:text-white tabular-nums">{last}</span> of{' '}
+        <span className="font-semibold text-zinc-900 dark:text-white tabular-nums">{total.toLocaleString('en-IN')}</span>{' '}
+        results
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center gap-1 sm:gap-1.5">
+          {/* First Page */}
+          <button
+            type="button"
+            className={navButtonClass}
+            disabled={disabled || page <= 1}
+            onClick={() => handlePageClick(1)}
+            aria-label="Go to first page"
+            title="First page"
+          >
+            <ChevronsLeft className="w-3.5 h-3.5" />
+            <span className="hidden xl:inline">First</span>
+          </button>
+
+          {/* Previous Page */}
+          <button
+            type="button"
+            className={navButtonClass}
+            disabled={disabled || page <= 1}
+            onClick={() => handlePageClick(page - 1)}
+            aria-label="Go to previous page"
+            title="Previous page"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Previous</span>
+          </button>
+
+          {/* Desktop Numeric Page Buttons */}
+          <div className="hidden sm:flex items-center gap-1">
+            {pages.map((item, index) => {
+              if (item === 'ellipsis') {
+                return (
+                  <span
+                    key={`ellipsis-${index}`}
+                    className="w-8 h-8 flex items-center justify-center text-zinc-400 dark:text-zinc-500 text-xs select-none"
+                    aria-hidden="true"
+                  >
+                    …
+                  </span>
+                );
+              }
+
+              const isCurrent = item === page;
+              return (
+                <button
+                  key={item}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => handlePageClick(item)}
+                  aria-current={isCurrent ? 'page' : undefined}
+                  aria-label={`Go to page ${item}`}
+                  className={`min-w-8 h-8 px-2 rounded-lg text-xs font-semibold flex items-center justify-center transition active:scale-95 cursor-pointer select-none ${
+                    isCurrent
+                      ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 shadow-xs font-bold'
+                      : 'border border-zinc-200 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                  }`}
+                >
+                  {item}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Mobile Current Page Indicator */}
+          <span className="sm:hidden px-2.5 py-1 text-xs font-semibold text-zinc-900 dark:text-white bg-zinc-100 dark:bg-zinc-800 rounded-lg">
+            {page} / {totalPages}
+          </span>
+
+          {/* Next Page */}
+          <button
+            type="button"
+            className={navButtonClass}
+            disabled={disabled || page >= totalPages}
+            onClick={() => handlePageClick(page + 1)}
+            aria-label="Go to next page"
+            title="Next page"
+          >
+            <span className="hidden sm:inline">Next</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Last Page */}
+          <button
+            type="button"
+            className={navButtonClass}
+            disabled={disabled || page >= totalPages}
+            onClick={() => handlePageClick(totalPages)}
+            aria-label="Go to last page"
+            title="Last page"
+          >
+            <span className="hidden xl:inline">Last</span>
+            <ChevronsRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </nav>
   );
 }
@@ -340,6 +447,8 @@ export function Modal({
 }) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  // Phone back button closes the dialog instead of leaving the page
+  const { requestClose } = useBackToClose(true, onClose);
 
   useEffect(() => {
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -354,17 +463,18 @@ export function Modal({
 
   useEffect(() => {
     const handleEsc = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !closeDisabled) onClose();
+      if (event.key === 'Escape' && !closeDisabled) requestClose();
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- requestClose is stable per open
   }, [onClose, closeDisabled]);
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-overlay-in overflow-y-auto"
       onClick={(event) => {
-        if (event.target === event.currentTarget && !closeDisabled) onClose();
+        if (event.target === event.currentTarget && !closeDisabled) requestClose();
       }}
     >
       <div
@@ -377,7 +487,7 @@ export function Modal({
       >
         <button
           type="button"
-          onClick={onClose}
+          onClick={requestClose}
           disabled={closeDisabled}
           aria-label="Close"
           className="absolute right-4 top-4 text-zinc-400 hover:text-zinc-900 dark:hover:text-white p-1 rounded-lg disabled:opacity-40"

@@ -7,15 +7,22 @@ import {
   User,
   CustomerProfile,
   KycProfile,
+  Referral,
+  ReferralCommission,
+  ProfitCredit,
 } from '../models/index.js';
 import {
   InvestmentStatus,
   WalletTxnType,
   WalletTxnDirection,
+  WalletBucket,
   NotificationType,
   UserRole,
   UserStatus,
   KycStatus,
+  ProfitPayoutMode,
+  RateBasis,
+  ReferralCommissionStatus,
 } from '../types/index.js';
 import { BadRequestError, ForbiddenError, NotFoundError } from '../utils/errors.js';
 import { toPaise, fromPaise, formatInr, generateReference } from '../utils/money.js';
@@ -25,11 +32,60 @@ import { logger } from '../utils/logger.js';
 import { ActivityLogService } from './activityLogService.js';
 import { NotificationService } from './notificationService.js';
 import { SettingsService } from './settingsService.js';
-import { WalletService } from './walletService.js';
-import { calculateProfitPaise } from './investmentPlanService.js';
+import { WalletService, BUCKET_LABELS } from './walletService.js';
+import { DailyPayoutService } from './dailyPayoutService.js';
+import {
+  calculateProfitPaise,
+  dailyProfitPaise,
+  dailyRatePercent,
+  weeklyProfitPaise,
+  monthlyProfitPaise,
+  payingDaysForTerm,
+  perCycleCap,
+  percentOfPaise,
+  profitDaysForTerm,
+} from './investmentPlanService.js';
 import { InvestInput } from '../validators/financeValidators.js';
+import {
+  PAYOUT_HOUR_IST,
+  WORKING_DAYS_PER_MONTH,
+  cycleNoForDay,
+  istDayKey,
+  istTimeOnDay,
+  latestPayableDay,
+} from '../utils/workingDays.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** How far ahead paying days are listed for open-ended investments (next credit, cycle progress) */
+const OPEN_ENDED_HORIZON_DAYS = 45;
+
+/** Fee charged when the capital of an investment is withdrawn, in paise */
+export function capitalFeePaise(amountPaise: number, feePercent: number): number {
+  return percentOfPaise(amountPaise, feePercent);
+}
+
+/**
+ * Money breakdown of a capital withdrawal. The fee is charged on the capital only; profit paid
+ * along with it (maturity-paid plans, profit granted by the admin on an early exit) is fee-free.
+ */
+export function capitalWithdrawalBreakdown(principalPaise: number, profitPaise: number, feePercent: number) {
+  const feePaise = capitalFeePaise(principalPaise, feePercent);
+  const grossPaise = principalPaise + profitPaise;
+  return { principalPaise, profitPaise, grossPaise, feePaise, netPaise: grossPaise - feePaise };
+}
+
+/**
+ * Whether the capital of an investment can be withdrawn right now. Lock-ins are no longer used
+ * (every investment is created with lock_in_days 0), so this only still honours legacy rows.
+ */
+export function lockState(inv: Investment, now = Date.now()) {
+  const start = parseDbDate(inv.start_date);
+  const lockInDays = Number(inv.lock_in_days) || 0;
+  const lockInEndsAt = start && lockInDays > 0 ? addDays(start, lockInDays) : null;
+  const isLocked =
+    lockInEndsAt !== null && lockInEndsAt.getTime() > now && !inv.early_withdrawal_allowed;
+  return { lockInDays, lockInEndsAt, isLocked };
+}
 
 export interface InvestmentFilterParams {
   page?: unknown;
@@ -47,6 +103,7 @@ export function serializeInvestment(inv: Investment) {
   const start = parseDbDate(inv.start_date);
   const maturity = parseDbDate(inv.maturity_date);
   const now = Date.now();
+  const isOpenEnded = !maturity;
 
   let progressPercent = 100;
   let daysRemaining = 0;
@@ -55,11 +112,57 @@ export function serializeInvestment(inv: Investment) {
     const elapsed = Math.max(0, Math.min(now - start.getTime(), total));
     progressPercent = total > 0 ? Math.round((elapsed / total) * 1000) / 10 : 100;
     daysRemaining = Math.max(0, Math.ceil((maturity.getTime() - now) / DAY_MS));
+  } else if (isOpenEnded && inv.status === InvestmentStatus.ACTIVE) {
+    progressPercent = 0;
   }
 
+  const { lockInDays, lockInEndsAt, isLocked } = lockState(inv, now);
   const canRequestWithdrawal =
-    inv.status === InvestmentStatus.MATURED ||
-    (inv.status === InvestmentStatus.ACTIVE && Boolean(inv.early_withdrawal_allowed));
+    (inv.status === InvestmentStatus.ACTIVE || inv.status === InvestmentStatus.MATURED) && !isLocked;
+
+  const isDaily = inv.payout_mode === ProfitPayoutMode.DAILY;
+  const amountPaise = toPaise(inv.amount);
+  const perDayPaise = isDaily ? dailyProfitPaise(inv, amountPaise) : 0;
+  const dailyProfit = fromPaise(perDayPaise);
+  const weeklyProfit = isDaily ? fromPaise(weeklyProfitPaise(inv, amountPaise)) : 0;
+  const monthlyProfit = isDaily ? fromPaise(monthlyProfitPaise(inv, amountPaise)) : 0;
+  const profitDays = isDaily && start && maturity ? profitDaysForTerm(inv, start, maturity) : 0;
+  const profitCredited = Number(inv.profit_credited) || 0;
+  const creditsPerCycle = isDaily ? perCycleCap(inv) ?? null : null;
+
+  // Daily plans: which paying day are we on, and when does the next credit land?
+  let creditedDays = 0;
+  let nextCreditAt: string | null = null;
+  let nextCreditDue = false;
+  let currentCycle = 0;
+  let creditsThisCycle = 0;
+  if (isDaily && start) {
+    const horizon = maturity ?? addDays(new Date(now), OPEN_ENDED_HORIZON_DAYS);
+    const payingDays = payingDaysForTerm(inv, start, horizon);
+    creditedDays = perDayPaise > 0 ? Math.round(toPaise(profitCredited) / perDayPaise) : 0;
+    const stillPaying =
+      inv.status === InvestmentStatus.ACTIVE ||
+      inv.status === InvestmentStatus.MATURED ||
+      inv.status === InvestmentStatus.WITHDRAWAL_REQUESTED;
+    const nextDay = payingDays[creditedDays];
+    if (stillPaying && nextDay) {
+      nextCreditAt = istTimeOnDay(nextDay, PAYOUT_HOUR_IST).toISOString();
+      nextCreditDue = nextDay <= latestPayableDay(new Date(now));
+    }
+    const startKey = istDayKey(start);
+    const todayKey = istDayKey(new Date(now));
+    currentCycle = todayKey > startKey ? cycleNoForDay(startKey, todayKey) : 0;
+    creditsThisCycle = payingDays
+      .slice(0, Math.min(creditedDays, payingDays.length))
+      .filter((d) => cycleNoForDay(startKey, d) === currentCycle).length;
+  }
+
+  // The fee is charged only when the customer closes the investment before it finishes. A
+  // matured investment (or one whose maturity date has passed) returns the capital in full.
+  const feePercent = Number(inv.fee_percent) || 0;
+  const earlyExitFeeApplies =
+    inv.status === InvestmentStatus.ACTIVE && (maturity === null || maturity.getTime() > now);
+  const feePaise = earlyExitFeeApplies ? capitalFeePaise(amountPaise, feePercent) : 0;
 
   return {
     id: inv.id,
@@ -69,9 +172,37 @@ export function serializeInvestment(inv: Investment) {
     planName: inv.plan_name,
     profitType: inv.profit_type,
     profitValue: inv.profit_value,
+    payoutMode: inv.payout_mode,
+    rateBasis: inv.rate_basis,
+    dailyRatePercent: isDaily ? dailyRatePercent(inv) : 0,
     durationDays: inv.duration_days,
+    isOpenEnded,
+    lockInDays,
+    lockInEndsAt: lockInEndsAt ? lockInEndsAt.toISOString() : null,
+    isLocked,
     amount: inv.amount,
     expectedProfit: inv.expected_profit,
+    // DAILY plans: profit per working day / week / month, number of paying days, and what has reached the wallet so far
+    dailyProfit,
+    weeklyProfit,
+    monthlyProfit,
+    profitDays,
+    profitCredited,
+    profitRemaining: fromPaise(Math.max(0, toPaise(inv.expected_profit) - toPaise(profitCredited))),
+    creditedDays,
+    // Monthly plans pay at most 20 credits per 30-day cycle
+    creditsPerCycle,
+    currentCycle,
+    creditsThisCycle,
+    nextCreditAt,
+    // true when the next credit day has already passed 6:00 AM IST and the job has not caught up yet
+    nextCreditDue,
+    // Closing the investment before it finishes costs this fee; the customer receives amount - fee.
+    // After maturity the fee is 0 and the capital is paid in full.
+    feePercent,
+    earlyExitFeeApplies,
+    capitalWithdrawalFee: fromPaise(feePaise),
+    netCapitalOnWithdrawal: fromPaise(amountPaise - feePaise),
     maturityAmount: inv.maturity_amount,
     startDate: toIso(inv.start_date),
     maturityDate: toIso(inv.maturity_date),
@@ -85,6 +216,39 @@ export function serializeInvestment(inv: Investment) {
     cancelledAt: toIso(inv.cancelled_at),
     cancelReason: inv.cancel_reason,
     createdAt: toIso(inv.created_at),
+  };
+}
+
+function serializeProfitCredits(inv: Investment) {
+  const credits: ProfitCredit[] = (inv as any).profitCredits || [];
+  return credits
+    .slice()
+    .sort((a, b) => (a.credit_day < b.credit_day ? 1 : a.credit_day > b.credit_day ? -1 : 0))
+    .map((c) => ({
+      id: c.id,
+      creditDay: c.credit_day,
+      cycleNo: c.cycle_no,
+      amount: c.amount,
+      creditedAt: toIso(c.created_at),
+      walletTransactionId: c.wallet_transaction_id,
+    }));
+}
+
+function serializeInvestmentWithdrawal(w: Withdrawal) {
+  return {
+    id: w.id,
+    reference: w.reference,
+    principalAmount: w.principal_amount,
+    profitAmount: w.profit_amount,
+    totalAmount: w.total_amount,
+    feePercent: w.fee_percent,
+    feeAmount: w.fee_amount,
+    netAmount: w.net_amount,
+    status: w.status,
+    isEarly: Boolean(w.is_early),
+    rejectionReason: w.rejection_reason,
+    createdAt: toIso(w.created_at),
+    completedAt: toIso(w.completed_at),
   };
 }
 
@@ -119,13 +283,26 @@ export class InvestmentService {
       throw new BadRequestError(`Maximum investment for ${plan.name} is ${formatInr(plan.max_amount)}`);
     }
 
-    const profitPaise = calculateProfitPaise(plan, amountPaise);
+    // duration_days 0 = open-ended: no maturity, runs until the capital is withdrawn
+    const maturityDate = plan.duration_days > 0 ? addDays(startDate, plan.duration_days) : null;
+    const profitPaise = calculateProfitPaise(plan, amountPaise, { startDate, maturityDate });
+
+    if (plan.payout_mode === ProfitPayoutMode.DAILY) {
+      if (dailyProfitPaise(plan, amountPaise) <= 0) {
+        throw new BadRequestError('The amount is too small to earn a daily profit under this plan. Please invest more.');
+      }
+      if (maturityDate && profitPaise <= 0) {
+        throw new BadRequestError(
+          'This plan has no working day (Monday-Friday) in its period on which profit could be paid. Please choose another plan.'
+        );
+      }
+    }
 
     return {
       amountPaise,
       profitPaise,
       maturityPaise: amountPaise + profitPaise,
-      maturityDate: addDays(startDate, plan.duration_days),
+      maturityDate,
     };
   }
 
@@ -144,21 +321,42 @@ export class InvestmentService {
    * Customer: expected profit & maturity for an amount, without investing
    */
   public static async preview(input: InvestInput) {
-    const plan = await this.getOpenPlan(input.planId);
+    const [plan, settings] = await Promise.all([this.getOpenPlan(input.planId), SettingsService.getSettings()]);
     const now = new Date();
     const result = this.calculate(plan, input.amount, now);
+
+    const isDaily = plan.payout_mode === ProfitPayoutMode.DAILY;
+    // Fee charged only if the customer closes the plan before it finishes
+    const feePaise = capitalFeePaise(result.amountPaise, settings.capitalWithdrawalFeePercent);
 
     return {
       planId: plan.id,
       planName: plan.name,
       amount: fromPaise(result.amountPaise),
+      source: input.source,
       durationDays: plan.duration_days,
+      isOpenEnded: result.maturityDate === null,
+      lockInDays: plan.lock_in_days,
+      lockInEndsAt: plan.lock_in_days > 0 ? addDays(now, plan.lock_in_days).toISOString() : null,
       profitType: plan.profit_type,
       profitValue: plan.profit_value,
+      payoutMode: plan.payout_mode,
+      rateBasis: plan.rate_basis,
+      dailyRatePercent: isDaily ? dailyRatePercent(plan) : 0,
+      dailyProfit: isDaily ? fromPaise(dailyProfitPaise(plan, result.amountPaise)) : 0,
+      weeklyProfit: isDaily ? fromPaise(weeklyProfitPaise(plan, result.amountPaise)) : 0,
+      monthlyProfit: isDaily ? fromPaise(monthlyProfitPaise(plan, result.amountPaise)) : 0,
+      creditsPerCycle: isDaily ? perCycleCap(plan) ?? null : null,
+      profitDays: isDaily && result.maturityDate ? profitDaysForTerm(plan, now, result.maturityDate) : 0,
+      payoutHourIst: PAYOUT_HOUR_IST,
       expectedProfit: fromPaise(result.profitPaise),
       maturityAmount: fromPaise(result.maturityPaise),
+      feePercent: settings.capitalWithdrawalFeePercent,
+      earlyExitFeeApplies: true,
+      capitalWithdrawalFee: fromPaise(feePaise),
+      netCapitalOnWithdrawal: fromPaise(result.amountPaise - feePaise),
       startDate: now.toISOString(),
-      maturityDate: result.maturityDate.toISOString(),
+      maturityDate: result.maturityDate ? result.maturityDate.toISOString() : null,
     };
   }
 
@@ -205,9 +403,14 @@ export class InvestmentService {
           plan_name: plan.name,
           profit_type: plan.profit_type,
           profit_value: plan.profit_value,
+          payout_mode: plan.payout_mode,
+          rate_basis: plan.rate_basis,
+          lock_in_days: plan.lock_in_days,
+          fee_percent: settings.capitalWithdrawalFeePercent,
           duration_days: plan.duration_days,
           amount: fromPaise(result.amountPaise),
           expected_profit: fromPaise(result.profitPaise),
+          profit_credited: 0,
           maturity_amount: fromPaise(result.maturityPaise),
           start_date: startDate,
           maturity_date: result.maturityDate,
@@ -216,22 +419,99 @@ export class InvestmentService {
         { transaction: t }
       );
 
-      // Throws on insufficient balance, which rolls the investment back
+      // Paid from the chosen bucket; re-invested profit becomes capital from here on.
+      // Throws on insufficient balance, which rolls the investment back.
       await WalletService.applyEntry(
         {
           userId,
           type: WalletTxnType.INVESTMENT,
           direction: WalletTxnDirection.DEBIT,
+          bucket: input.source,
           amountPaise: result.amountPaise,
-          description: `Investment in ${plan.name} (${created.reference})`,
+          description: `Investment in ${plan.name} (${created.reference}) from ${BUCKET_LABELS[input.source]}`,
           relatedEntity: 'INVESTMENT',
           relatedId: created.id,
         },
         t
       );
 
+      // Referral commission for the customer who referred this investor: a one-time
+      // percentage of the amount, credited to the referrer's PROFIT wallet instantly,
+      // in the same transaction as the investment.
+      if (settings.referralCommissionPercent > 0) {
+        const referral = await Referral.findOne({ where: { referred_user_id: userId }, transaction: t });
+        const referrer = referral ? await User.findByPk(referral.referrer_user_id, { attributes: ['id', 'status', 'role'], transaction: t }) : null;
+        const referrerEligible =
+          referral !== null &&
+          referral.referrer_user_id !== userId &&
+          referrer !== null &&
+          referrer.role === UserRole.CUSTOMER &&
+          referrer.status === UserStatus.ACTIVE;
+        if (referral && !referrerEligible) {
+          logger.warn(`[REFERRAL] No commission on investment ${created.reference}: referrer #${referral.referrer_user_id} is not an active customer`);
+        }
+        if (referral && referrerEligible) {
+          const commissionPaise = percentOfPaise(result.amountPaise, settings.referralCommissionPercent);
+          if (commissionPaise > 0) {
+            const now = new Date();
+            const commission = await ReferralCommission.create(
+              {
+                referrer_user_id: referral.referrer_user_id,
+                referred_user_id: userId,
+                investment_id: created.id,
+                investment_amount: fromPaise(result.amountPaise),
+                commission_percent: settings.referralCommissionPercent,
+                amount: fromPaise(commissionPaise),
+                status: ReferralCommissionStatus.CREDITED,
+                eligible_at: now,
+                credited_at: now,
+              },
+              { transaction: t }
+            );
+            const txn = await WalletService.applyEntry(
+              {
+                userId: referral.referrer_user_id,
+                type: WalletTxnType.REFERRAL_COMMISSION,
+                direction: WalletTxnDirection.CREDIT,
+                bucket: WalletBucket.PROFIT,
+                amountPaise: commissionPaise,
+                description: `Referral commission (${settings.referralCommissionPercent}%) on investment ${created.reference} by referred customer #${userId}`,
+                relatedEntity: 'REFERRAL_COMMISSION',
+                relatedId: commission.id,
+              },
+              t
+            );
+            commission.wallet_transaction_id = txn.id;
+            await commission.save({ transaction: t });
+            (created as any).referralCommission = commission;
+          }
+        }
+      }
+
       return created;
     });
+
+    const paidCommission: ReferralCommission | undefined = (investment as any).referralCommission;
+    if (paidCommission) {
+      const referredName = (user as any).profile?.full_name || 'a customer you referred';
+      await ActivityLogService.log({
+        userId: paidCommission.referrer_user_id,
+        action: 'REFERRAL_COMMISSION_CREDITED',
+        entity: 'REFERRAL_COMMISSION',
+        entityId: paidCommission.id,
+        description: `Referral commission of ${formatInr(paidCommission.amount)} credited to user #${paidCommission.referrer_user_id} for investment ${investment.reference} of user #${userId}`,
+      });
+      await NotificationService.notify({
+        userId: paidCommission.referrer_user_id,
+        type: NotificationType.REFERRAL_COMMISSION,
+        title: 'Referral commission credited',
+        message: `${formatInr(paidCommission.amount)} referral commission (${paidCommission.commission_percent}% of ${formatInr(
+          paidCommission.investment_amount
+        )} invested by ${referredName}) has been credited to your profit wallet.`,
+        relatedEntity: 'REFERRAL_COMMISSION',
+        relatedId: paidCommission.id,
+      });
+    }
 
     await ActivityLogService.log({
       userId,
@@ -243,29 +523,45 @@ export class InvestmentService {
       userAgent: meta.userAgent,
     });
 
+    const serialized = serializeInvestment(investment);
+
     await NotificationService.notify({
       userId,
       type: NotificationType.INVESTMENT_CONFIRMED,
       title: 'Investment confirmed',
-      message: `Your investment of ${formatInr(investment.amount)} in ${investment.plan_name} (${investment.reference}) is active. Expected maturity amount: ${formatInr(
-        investment.maturity_amount
-      )}.`,
+      message:
+        investment.payout_mode === ProfitPayoutMode.DAILY
+          ? `Your investment of ${formatInr(investment.amount)} in ${investment.plan_name} (${investment.reference}) is active. ${formatInr(
+              serialized.dailyProfit
+            )} profit will be credited to your profit wallet every working day (Mon-Fri) at ${PAYOUT_HOUR_IST}:00 AM, about ${formatInr(
+              serialized.monthlyProfit
+            )} a month${
+              serialized.isOpenEnded
+                ? ', for as long as your capital stays invested.'
+                : ` and ${formatInr(investment.expected_profit)} in total over ${serialized.profitDays} working days. Your capital returns to your capital wallet at maturity.`
+            }`
+          : `Your investment of ${formatInr(investment.amount)} in ${investment.plan_name} (${investment.reference}) is active. Expected maturity amount: ${formatInr(
+              investment.maturity_amount
+            )}.`,
       relatedEntity: 'INVESTMENT',
       relatedId: investment.id,
     });
 
-    return serializeInvestment(investment);
+    return serialized;
   }
 
   /**
-   * Moves every ACTIVE investment past its maturity date to MATURED.
-   * Safe to run concurrently: the status guard makes each update idempotent.
+   * Settles every ACTIVE investment past its maturity date: the remaining daily profit is
+   * credited, the capital returns to the customer's capital wallet (maturity-paid plans also
+   * credit their profit to the profit wallet) and the investment is COMPLETED. From the capital
+   * wallet the customer can re-invest or withdraw it in full, without fee.
+   * Safe to run concurrently: rows are locked and the status re-checked inside the transaction.
    */
   public static async matureDueInvestments(userId?: number): Promise<number> {
     const now = new Date();
     const where: any = {
       status: InvestmentStatus.ACTIVE,
-      maturity_date: { [Op.lte]: now },
+      maturity_date: { [Op.and]: [{ [Op.ne]: null }, { [Op.lte]: now }] },
     };
     if (userId) where.user_id = userId;
 
@@ -273,11 +569,56 @@ export class InvestmentService {
     let matured = 0;
 
     for (const inv of due) {
-      const [updated] = await Investment.update(
-        { status: InvestmentStatus.MATURED, matured_at: now },
-        { where: { id: inv.id, status: InvestmentStatus.ACTIVE } }
-      );
-      if (updated === 0) continue;
+      const maturity = parseDbDate(inv.maturity_date);
+      if (!maturity) continue;
+
+      // Pay the last profit days first (own transactions, idempotent)
+      await DailyPayoutService.creditInvestmentUpTo(inv, istDayKey(maturity));
+
+      const settled = await sequelize.transaction(async (t) => {
+        const fresh = await Investment.findByPk(inv.id, { transaction: t, lock: t.LOCK.UPDATE });
+        if (!fresh || fresh.status !== InvestmentStatus.ACTIVE) return null;
+
+        await WalletService.applyEntry(
+          {
+            userId: fresh.user_id,
+            type: WalletTxnType.MATURITY_PRINCIPAL,
+            direction: WalletTxnDirection.CREDIT,
+            bucket: WalletBucket.CAPITAL,
+            amountPaise: toPaise(fresh.amount),
+            description: `Capital returned at maturity of investment ${fresh.reference} (${fresh.plan_name})`,
+            relatedEntity: 'INVESTMENT',
+            relatedId: fresh.id,
+          },
+          t
+        );
+
+        const profitPaise = fresh.payout_mode === ProfitPayoutMode.AT_MATURITY ? toPaise(fresh.expected_profit) : 0;
+        if (profitPaise > 0) {
+          await WalletService.applyEntry(
+            {
+              userId: fresh.user_id,
+              type: WalletTxnType.PROFIT,
+              direction: WalletTxnDirection.CREDIT,
+              bucket: WalletBucket.PROFIT,
+              amountPaise: profitPaise,
+              description: `Profit earned on investment ${fresh.reference} (${fresh.plan_name})`,
+              relatedEntity: 'INVESTMENT',
+              relatedId: fresh.id,
+            },
+            t
+          );
+          await Investment.increment({ profit_credited: fromPaise(profitPaise) }, { where: { id: fresh.id }, transaction: t });
+        }
+
+        fresh.status = InvestmentStatus.COMPLETED;
+        fresh.matured_at = now;
+        fresh.completed_at = now;
+        fresh.early_withdrawal_allowed = false;
+        await fresh.save({ transaction: t });
+        return { profitPaise };
+      });
+      if (!settled) continue;
 
       matured += 1;
 
@@ -285,23 +626,29 @@ export class InvestmentService {
         action: 'INVESTMENT_MATURED',
         entity: 'INVESTMENT',
         entityId: inv.id,
-        description: `Investment ${inv.reference} of customer #${inv.user_id} matured (${formatInr(inv.maturity_amount)} payable)`,
+        description: `Investment ${inv.reference} of customer #${inv.user_id} matured; ${formatInr(
+          inv.amount
+        )} capital returned to the capital wallet${
+          settled.profitPaise > 0 ? ` and ${formatInr(fromPaise(settled.profitPaise))} profit credited` : ''
+        }`,
       });
 
       await NotificationService.notify({
         userId: inv.user_id,
         type: NotificationType.INVESTMENT_MATURED,
         title: 'Investment matured',
-        message: `Your investment ${inv.reference} in ${inv.plan_name} has matured. ${formatInr(
-          inv.maturity_amount
-        )} is ready - submit a withdrawal request to receive it.`,
+        message: `Your investment ${inv.reference} in ${inv.plan_name} has matured. Your capital of ${formatInr(
+          inv.amount
+        )} is back in your capital wallet${
+          settled.profitPaise > 0 ? ` and ${formatInr(fromPaise(settled.profitPaise))} profit is in your profit wallet` : ''
+        }. Re-invest it in a plan to keep earning, or withdraw it to your bank account in full, no fee.`,
         relatedEntity: 'INVESTMENT',
         relatedId: inv.id,
       });
     }
 
     if (matured > 0) {
-      logger.info(`[MATURITY] ${matured} investment(s) moved to MATURED`);
+      logger.info(`[MATURITY] ${matured} investment(s) settled and completed`);
     }
     return matured;
   }
@@ -350,7 +697,10 @@ export class InvestmentService {
 
     const investment = await Investment.findOne({
       where: { id: investmentId, user_id: userId },
-      include: [{ model: Withdrawal, as: 'withdrawals' }],
+      include: [
+        { model: Withdrawal, as: 'withdrawals' },
+        { model: ProfitCredit, as: 'profitCredits' },
+      ],
     });
     if (!investment) {
       throw new NotFoundError('Investment not found');
@@ -360,17 +710,8 @@ export class InvestmentService {
 
     return {
       ...serializeInvestment(investment),
-      withdrawals: withdrawals
-        .sort((a, b) => b.id - a.id)
-        .map((w) => ({
-          id: w.id,
-          reference: w.reference,
-          totalAmount: w.total_amount,
-          status: w.status,
-          rejectionReason: w.rejection_reason,
-          createdAt: toIso(w.created_at),
-          completedAt: toIso(w.completed_at),
-        })),
+      profitCredits: serializeProfitCredits(investment),
+      withdrawals: withdrawals.sort((a, b) => b.id - a.id).map(serializeInvestmentWithdrawal),
     };
   }
 
@@ -436,7 +777,7 @@ export class InvestmentService {
     await this.matureDueInvestments();
 
     const investment = await Investment.findByPk(investmentId, {
-      include: [userInclude, { model: Withdrawal, as: 'withdrawals' }],
+      include: [userInclude, { model: Withdrawal, as: 'withdrawals' }, { model: ProfitCredit, as: 'profitCredits' }],
     });
     if (!investment) {
       throw new NotFoundError('Investment not found');
@@ -446,19 +787,8 @@ export class InvestmentService {
 
     return {
       ...serializeForAdmin(investment),
-      withdrawals: withdrawals
-        .sort((a, b) => b.id - a.id)
-        .map((w) => ({
-          id: w.id,
-          reference: w.reference,
-          principalAmount: w.principal_amount,
-          profitAmount: w.profit_amount,
-          totalAmount: w.total_amount,
-          status: w.status,
-          isEarly: Boolean(w.is_early),
-          createdAt: toIso(w.created_at),
-          completedAt: toIso(w.completed_at),
-        })),
+      profitCredits: serializeProfitCredits(investment),
+      withdrawals: withdrawals.sort((a, b) => b.id - a.id).map(serializeInvestmentWithdrawal),
     };
   }
 
@@ -487,8 +817,9 @@ export class InvestmentService {
           userId: inv.user_id,
           type: WalletTxnType.REFUND,
           direction: WalletTxnDirection.CREDIT,
+          bucket: WalletBucket.CAPITAL,
           amountPaise: toPaise(inv.amount),
-          description: `Refund for cancelled investment ${inv.reference}`,
+          description: `Capital refunded for cancelled investment ${inv.reference}`,
           relatedEntity: 'INVESTMENT',
           relatedId: inv.id,
           createdBy: adminId,
@@ -501,6 +832,46 @@ export class InvestmentService {
       inv.cancel_reason = reason.trim();
       inv.early_withdrawal_allowed = false;
       await inv.save({ transaction: t });
+
+      // A referral commission that has not been paid yet is forfeited with the investment
+      await ReferralCommission.update(
+        { status: ReferralCommissionStatus.CANCELLED, cancelled_at: new Date() },
+        { where: { investment_id: inv.id, status: ReferralCommissionStatus.PENDING }, transaction: t }
+      );
+      // A commission already paid to the referrer is taken back from their profit wallet when
+      // it still holds enough; otherwise it is left as paid and noted in the log.
+      const paid = await ReferralCommission.findAll({
+        where: { investment_id: inv.id, status: ReferralCommissionStatus.CREDITED },
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+      for (const commission of paid) {
+        const referrerWallet = await WalletService.getLockedWallet(commission.referrer_user_id, t);
+        const amountPaise = toPaise(commission.amount);
+        if (toPaise(referrerWallet.profit_balance) < amountPaise) {
+          logger.warn(
+            `[INVESTMENT] Commission #${commission.id} (${formatInr(commission.amount)}) on cancelled investment ${inv.reference} was not reversed: referrer #${commission.referrer_user_id} has insufficient profit balance`
+          );
+          continue;
+        }
+        await WalletService.applyEntry(
+          {
+            userId: commission.referrer_user_id,
+            type: WalletTxnType.REFERRAL_COMMISSION,
+            direction: WalletTxnDirection.DEBIT,
+            bucket: WalletBucket.PROFIT,
+            amountPaise,
+            description: `Referral commission reversed: investment ${inv.reference} was cancelled`,
+            relatedEntity: 'REFERRAL_COMMISSION',
+            relatedId: commission.id,
+            createdBy: adminId,
+          },
+          t
+        );
+        commission.status = ReferralCommissionStatus.CANCELLED;
+        commission.cancelled_at = new Date();
+        await commission.save({ transaction: t });
+      }
       return inv;
     });
 
@@ -511,7 +882,7 @@ export class InvestmentService {
       entityId: investment.id,
       description: `Admin #${adminId} cancelled investment ${investment.reference} and refunded ${formatInr(
         investment.amount
-      )} to customer #${investment.user_id} wallet. Reason: ${reason}`,
+      )} to customer #${investment.user_id} capital wallet. Reason: ${reason}`,
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
     });
@@ -522,7 +893,7 @@ export class InvestmentService {
       title: 'Investment cancelled',
       message: `Your investment ${investment.reference} was cancelled and ${formatInr(
         investment.amount
-      )} was refunded to your wallet. Reason: ${reason}`,
+      )} was refunded to your capital wallet. Reason: ${reason}`,
       relatedEntity: 'INVESTMENT',
       relatedId: investment.id,
     });

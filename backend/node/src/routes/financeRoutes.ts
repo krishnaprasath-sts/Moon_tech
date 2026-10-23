@@ -5,7 +5,7 @@ import { authenticate } from '../middleware/authenticate.js';
 import { authorize } from '../middleware/authorize.js';
 import { validate } from '../middleware/validate.js';
 import { authRateLimiter } from '../middleware/rateLimiter.js';
-import { uploadReceipt, uploadPaymentProof } from '../middleware/upload.js';
+import { uploadReceipt, uploadPaymentProof, uploadUpiQr } from '../middleware/upload.js';
 import { UserRole } from '../types/index.js';
 import {
   updateSettingsSchema,
@@ -20,6 +20,7 @@ import {
   cancelInvestmentSchema,
   earlyWithdrawalSchema,
   requestWithdrawalSchema,
+  walletWithdrawalSchema,
   approveWithdrawalSchema,
   completeWithdrawalSchema,
   walletAdjustmentSchema,
@@ -70,6 +71,14 @@ walletRouter.post(
   FinanceController.createDeposit
 );
 walletRouter.get('/deposits/:id/receipt', authenticate, customer, FinanceController.getDepositReceipt);
+// Withdraw free wallet balance (daily profit, referral commission, refunds) to bank / UPI
+walletRouter.post(
+  '/withdrawals',
+  authenticate,
+  customer,
+  validate(walletWithdrawalSchema),
+  FinanceController.requestWalletWithdrawal
+);
 
 export const investmentPlanRouter = Router();
 investmentPlanRouter.get('/', FinanceController.getPlans);
@@ -92,6 +101,10 @@ export const withdrawalRouter = Router();
 withdrawalRouter.get('/', authenticate, customer, FinanceController.getWithdrawals);
 withdrawalRouter.get('/:id/proof', authenticate, customer, FinanceController.getWithdrawalProof);
 
+// Files that must load without a login (used in <img> tags on the customer site)
+export const publicRouter = Router();
+publicRouter.get('/upi-qr/:file', FinanceController.getUpiQrImage);
+
 export const notificationRouter = Router();
 notificationRouter.get('/', authenticate, FinanceController.getNotifications);
 notificationRouter.get('/unread-count', authenticate, FinanceController.getUnreadCount);
@@ -111,6 +124,8 @@ adminFinanceRouter.get('/customers/:id/finance', staff, AdminFinanceController.g
 // Settings (wallet limits, UPI details)
 adminFinanceRouter.get('/settings', staff, AdminFinanceController.getSettings);
 adminFinanceRouter.put('/settings', managers, validate(updateSettingsSchema), AdminFinanceController.updateSettings);
+adminFinanceRouter.post('/settings/upi-qr', managers, uploadUpiQr, AdminFinanceController.uploadUpiQr);
+adminFinanceRouter.delete('/settings/upi-qr', managers, AdminFinanceController.removeUpiQr);
 
 // Payment management
 adminFinanceRouter.get('/deposits', staff, AdminFinanceController.listDeposits);
@@ -209,6 +224,10 @@ adminFinanceRouter.post(
   validate(announcementSchema),
   AdminFinanceController.createAnnouncement
 );
+
+// Daily profit / referral commission payout job
+adminFinanceRouter.get('/payouts/status', staff, AdminFinanceController.getPayoutStatus);
+adminFinanceRouter.post('/payouts/run', managers, AdminFinanceController.runPayouts);
 
 // Reports
 adminFinanceRouter.get('/reports/:type', staff, AdminFinanceController.getReport);
