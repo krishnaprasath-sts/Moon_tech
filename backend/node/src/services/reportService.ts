@@ -1,4 +1,5 @@
 import { Op } from 'sequelize';
+import PDFDocument from 'pdfkit';
 import {
   User,
   CustomerProfile,
@@ -21,7 +22,7 @@ import {
 } from '../types/index.js';
 import { BadRequestError } from '../utils/errors.js';
 import { toPaise, fromPaise } from '../utils/money.js';
-import { toIso, parseDateRange } from '../utils/dates.js';
+import { toIso, parseDateRange, parseDbDate } from '../utils/dates.js';
 import { InvestmentService } from './investmentService.js';
 
 export const REPORT_TYPES = [
@@ -646,5 +647,384 @@ export class ReportService {
 
     // BOM so Excel detects UTF-8
     return `﻿${lines.join('\r\n')}\r\n`;
+  }
+
+  /**
+   * Renders a report as an A4 landscape PDF: brand header, summary, then a paginated table
+   * (header row repeated on every page) with a "Page X of Y" footer.
+   */
+  public static toPdf(report: ReportResult): Promise<Buffer> {
+    return new Promise<Buffer>((resolve, reject) => {
+      try {
+        const doc = new PDFDocument({
+          size: 'A4',
+          layout: 'landscape',
+          margins: { top: 32, bottom: 36, left: 28, right: 28 },
+          bufferPages: true,
+          info: { Title: `${PDF_BRAND} - ${report.title}`, Author: PDF_BRAND, Creator: PDF_BRAND },
+        });
+        const chunks: Buffer[] = [];
+        doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+        doc.on('end', () => resolve(Buffer.concat(chunks)));
+        doc.on('error', reject);
+
+        renderReportPdf(doc, report);
+        doc.end();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PDF rendering helpers
+// ---------------------------------------------------------------------------
+
+const PDF_BRAND = 'Clyvus Ventures';
+const PDF_TZ = 'Asia/Kolkata';
+const PDF_COLORS = {
+  brand: '#0f3d68',
+  text: '#1f2937',
+  muted: '#6b7280',
+  border: '#d1d5db',
+  headerBg: '#0f3d68',
+  headerText: '#ffffff',
+  zebra: '#f1f5f9',
+  summaryBg: '#f8fafc',
+  warning: '#9a3412',
+};
+const PDF_CELL_PAD_Y = 3;
+const PDF_LINE_GAP = 0.5;
+const PDF_COL_MIN = 38;
+const PDF_COL_MAX = 170;
+
+const moneyFormatter = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const numberFormatter = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 });
+const dateTimeFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: PDF_TZ,
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: true,
+});
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Built-in Helvetica only covers WinAnsi: swap the rupee sign and replace glyphs it cannot draw */
+const pdfSafe = (text: string): string =>
+  text
+    .replace(/₹/g, 'Rs.')
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, '-')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[^\n\t\x20-\x7E\xA0-\xFF]/g, '?');
+
+const isEmptyValue = (value: unknown) => value === null || value === undefined || value === '';
+
+const formatPdfMoney = (value: unknown): string => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return pdfSafe(String(value));
+  const text = `Rs. ${moneyFormatter.format(Math.abs(num))}`;
+  return num < 0 ? `-${text}` : text;
+};
+
+/** Any timestamp -> IST "dd MMM yyyy, hh:mm AM" */
+const formatPdfDateTime = (value: unknown): string => {
+  const date = parseDbDate(value);
+  if (!date) return pdfSafe(String(value));
+  const parts: Record<string, string> = {};
+  for (const part of dateTimeFormatter.formatToParts(date)) parts[part.type] = part.value;
+  // Non-breaking spaces inside the date and the time, so a narrow column wraps only at ", "
+  const nb = ' ';
+  return `${parts.day}${nb}${parts.month}${nb}${parts.year}, ${parts.hour}:${parts.minute}${nb}${(parts.dayPeriod || '').toUpperCase()}`;
+};
+
+/** YYYY-MM-DD query value -> "dd MMM yyyy" (calendar day, no timezone shift) */
+const formatPdfDay = (value: string): string => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[3]} ${MONTHS[Number(match[2]) - 1]} ${match[1]}` : pdfSafe(value);
+};
+
+const formatPdfNumber = (value: unknown, grouped = true): string => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return pdfSafe(String(value));
+  return grouped ? numberFormatter.format(num) : String(num);
+};
+
+const formatPdfCell = (column: ReportColumn, value: unknown): string => {
+  if (isEmptyValue(value)) return '-';
+  switch (column.type) {
+    case 'money':
+      return formatPdfMoney(value);
+    case 'date':
+      return formatPdfDateTime(value);
+    case 'number':
+      // Identifiers (e.g. customerId) read better without thousands separators
+      return formatPdfNumber(value, !/id$/i.test(column.key));
+    default:
+      return pdfSafe(String(value));
+  }
+};
+
+const formatPdfSummary = (item: ReportResult['summary'][number]): string => {
+  if (isEmptyValue(item.value)) return '-';
+  if (item.type === 'money') return formatPdfMoney(item.value);
+  if (item.type === 'number') return formatPdfNumber(item.value);
+  return pdfSafe(String(item.value));
+};
+
+/** Font size / horizontal padding: wide reports (e.g. 16-column withdrawals) get the tighter layout */
+const pdfTableMetrics = (columnCount: number) =>
+  columnCount > 12 ? { fontSize: 7, padX: 3 } : { fontSize: 7.5, padX: 4 };
+
+/**
+ * Column widths from label/content length, fitted to the page width:
+ * - floor: the longest single word in the column, so words don't break mid-token (dates may wrap
+ *   at ", " and money after "Rs.", their other spaces are non-breaking);
+ * - target: the 90th-percentile full cell width, so one very long value wraps instead of hogging space.
+ * Floors are allocated first, then spare width goes to columns in proportion to how much more they
+ * want. If even the floors overflow, only the widest columns are capped (water-filling).
+ */
+function computeColumnWidths(
+  doc: PDFKit.PDFDocument,
+  columns: ReportColumn[],
+  cells: string[][],
+  available: number,
+  metrics: { fontSize: number; padX: number }
+): number[] {
+  const pad = metrics.padX * 2 + 1;
+  const clamp = (w: number) => Math.min(PDF_COL_MAX, Math.max(PDF_COL_MIN, w));
+  const sample = cells.slice(0, 500);
+
+  const floors: number[] = [];
+  const targets: number[] = [];
+  columns.forEach((column, i) => {
+    doc.font('Helvetica-Bold').fontSize(metrics.fontSize);
+    const labelWord = Math.max(...column.label.split(/\s+/).map((w) => doc.widthOfString(w)));
+
+    doc.font('Helvetica').fontSize(metrics.fontSize);
+    let longestWord = 0;
+    const full: number[] = [];
+    for (const row of sample) {
+      const text = row[i];
+      full.push(Math.max(...text.split('\n').map((line) => doc.widthOfString(line))));
+      for (const word of text.split(/[ \n\t]+/)) longestWord = Math.max(longestWord, doc.widthOfString(word));
+    }
+    full.sort((a, b) => a - b);
+    const p90 = full.length ? full[Math.min(full.length - 1, Math.floor(full.length * 0.9))] : 0;
+
+    // Very long tokens (e.g. long e-mail addresses) may still wrap; cap their floor
+    const floor = clamp(Math.max(labelWord, Math.min(longestWord, 110)) + pad);
+    floors.push(floor);
+    targets.push(Math.max(floor, clamp(Math.max(p90, labelWord) + pad)));
+  });
+
+  const floorTotal = floors.reduce((a, b) => a + b, 0);
+  if (floorTotal > available) {
+    // Find the cap c where sum(min(floor, c)) == available; narrower columns stay intact
+    const sorted = [...floors].sort((a, b) => a - b);
+    let remaining = available;
+    let cap = sorted[sorted.length - 1];
+    for (let i = 0; i < sorted.length; i += 1) {
+      const level = remaining / (sorted.length - i);
+      if (sorted[i] >= level) {
+        cap = level;
+        break;
+      }
+      remaining -= sorted[i];
+    }
+    return floors.map((w) => Math.min(w, cap));
+  }
+
+  let spare = available - floorTotal;
+  const widths = [...floors];
+  const wants = targets.map((t, i) => t - floors[i]);
+  const wantTotal = wants.reduce((a, b) => a + b, 0);
+  if (wantTotal > 0) {
+    const share = Math.min(1, spare / wantTotal);
+    wants.forEach((want, i) => (widths[i] += want * share));
+    spare -= Math.min(spare, wantTotal);
+  }
+  if (spare > 0) {
+    // Every column has what it wants: spread the leftover proportionally
+    const total = widths.reduce((a, b) => a + b, 0);
+    return widths.map((w) => w + (w / total) * spare);
+  }
+  return widths;
+}
+
+function renderReportPdf(doc: PDFKit.PDFDocument, report: ReportResult): void {
+  const left = doc.page.margins.left;
+  const contentWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const bottomLimit = () => doc.page.height - doc.page.margins.bottom;
+
+  // ---- Header --------------------------------------------------------------
+  let y = doc.page.margins.top;
+  doc.fillColor(PDF_COLORS.brand).font('Helvetica-Bold').fontSize(18).text(PDF_BRAND, left, y, { lineBreak: false });
+  doc
+    .fillColor(PDF_COLORS.muted)
+    .font('Helvetica')
+    .fontSize(8)
+    .text(`Generated: ${formatPdfDateTime(report.generatedAt)} IST`, left, y + 4, {
+      width: contentWidth,
+      align: 'right',
+      lineBreak: false,
+    });
+  y += 24;
+
+  let range = 'All dates';
+  if (report.startDate && report.endDate) range = `${formatPdfDay(report.startDate)} to ${formatPdfDay(report.endDate)}`;
+  else if (report.startDate) range = `From ${formatPdfDay(report.startDate)}`;
+  else if (report.endDate) range = `Up to ${formatPdfDay(report.endDate)}`;
+
+  doc.fillColor(PDF_COLORS.text).font('Helvetica-Bold').fontSize(13).text(pdfSafe(report.title), left, y, { lineBreak: false });
+  doc
+    .fillColor(PDF_COLORS.muted)
+    .font('Helvetica')
+    .fontSize(8)
+    .text(`Period: ${range}`, left, y + 4, { width: contentWidth, align: 'right', lineBreak: false });
+  y += 20;
+  doc.moveTo(left, y).lineTo(left + contentWidth, y).lineWidth(1).strokeColor(PDF_COLORS.brand).stroke();
+  y += 8;
+
+  // ---- Summary -------------------------------------------------------------
+  if (report.summary.length) {
+    const gap = 6;
+    const perRow = Math.min(6, report.summary.length);
+    const boxWidth = (contentWidth - gap * (perRow - 1)) / perRow;
+    const boxHeight = 30;
+    report.summary.forEach((item, i) => {
+      const bx = left + (i % perRow) * (boxWidth + gap);
+      const by = y + Math.floor(i / perRow) * (boxHeight + gap);
+      doc.lineWidth(0.5).rect(bx, by, boxWidth, boxHeight).fillAndStroke(PDF_COLORS.summaryBg, PDF_COLORS.border);
+      doc
+        .fillColor(PDF_COLORS.muted)
+        .font('Helvetica')
+        .fontSize(7)
+        .text(`${pdfSafe(item.label)}:`, bx + 6, by + 5, { width: boxWidth - 12, lineBreak: false, ellipsis: true });
+      doc
+        .fillColor(PDF_COLORS.text)
+        .font('Helvetica-Bold')
+        .fontSize(10)
+        .text(formatPdfSummary(item), bx + 6, by + 15, { width: boxWidth - 12, lineBreak: false, ellipsis: true });
+    });
+    y += Math.ceil(report.summary.length / perRow) * (boxHeight + gap) + 4;
+  }
+
+  if (report.truncated) {
+    doc
+      .fillColor(PDF_COLORS.warning)
+      .font('Helvetica-Oblique')
+      .fontSize(8)
+      .text(
+        `Note: only the first ${formatPdfNumber(report.rows.length)} rows are included. Narrow the date range to see the rest.`,
+        left,
+        y,
+        { width: contentWidth }
+      );
+    y = doc.y + 6;
+  }
+
+  // ---- Table ---------------------------------------------------------------
+  const { columns } = report;
+  const cells = report.rows.map((row) => columns.map((c) => formatPdfCell(c, row[c.key])));
+  const metrics = pdfTableMetrics(columns.length);
+  const widths = computeColumnWidths(doc, columns, cells, contentWidth, metrics);
+
+  // Dates and amounts that don't fit get an explicit break (", " / after "Rs."); pdfkit's own
+  // wrapping would carry the space onto the next line and misalign it
+  doc.font('Helvetica').fontSize(metrics.fontSize);
+  columns.forEach((column, i) => {
+    if (column.type !== 'date' && column.type !== 'money') return;
+    const inner = widths[i] - metrics.padX * 2;
+    for (const row of cells) {
+      if (doc.widthOfString(row[i]) <= inner) continue;
+      row[i] = column.type === 'date' ? row[i].replace(', ', ',\n') : row[i].replace('Rs. ', 'Rs.\n');
+    }
+  });
+  const alignFor = (c: ReportColumn) => (c.type === 'money' || c.type === 'number' ? 'right' : 'left');
+
+  const measureRow = (texts: string[], font: string) => {
+    doc.font(font).fontSize(metrics.fontSize);
+    let height = 0;
+    texts.forEach((text, i) => {
+      const h = doc.heightOfString(text, { width: widths[i] - metrics.padX * 2, lineGap: PDF_LINE_GAP });
+      height = Math.max(height, h);
+    });
+    return Math.ceil(height + PDF_CELL_PAD_Y * 2);
+  };
+
+  const drawRow = (texts: string[], rowY: number, height: number, font: string, color: string, fill?: string) => {
+    if (fill) doc.rect(left, rowY, contentWidth, height).fill(fill);
+    let x = left;
+    doc.font(font).fontSize(metrics.fontSize).fillColor(color);
+    texts.forEach((text, i) => {
+      doc.text(text, x + metrics.padX, rowY + PDF_CELL_PAD_Y, {
+        width: widths[i] - metrics.padX * 2,
+        align: alignFor(columns[i]),
+        lineGap: PDF_LINE_GAP,
+      });
+      x += widths[i];
+    });
+    doc
+      .moveTo(left, rowY + height)
+      .lineTo(left + contentWidth, rowY + height)
+      .lineWidth(0.4)
+      .strokeColor(PDF_COLORS.border)
+      .stroke();
+  };
+
+  const headerTexts = columns.map((c) => pdfSafe(c.label));
+  const headerHeight = measureRow(headerTexts, 'Helvetica-Bold');
+  const drawHeader = (atY: number) => {
+    drawRow(headerTexts, atY, headerHeight, 'Helvetica-Bold', PDF_COLORS.headerText, PDF_COLORS.headerBg);
+    return atY + headerHeight;
+  };
+
+  if (y + headerHeight + 40 > bottomLimit()) {
+    doc.addPage();
+    y = doc.page.margins.top;
+  }
+  y = drawHeader(y);
+
+  if (!cells.length) {
+    doc
+      .fillColor(PDF_COLORS.muted)
+      .font('Helvetica-Oblique')
+      .fontSize(9)
+      .text('No records for the selected period', left, y + 14, { width: contentWidth, align: 'center' });
+  }
+
+  cells.forEach((texts, index) => {
+    const rowHeight = measureRow(texts, 'Helvetica');
+    if (y + rowHeight > bottomLimit()) {
+      doc.addPage();
+      y = drawHeader(doc.page.margins.top);
+    }
+    drawRow(texts, y, rowHeight, 'Helvetica', PDF_COLORS.text, index % 2 === 1 ? PDF_COLORS.zebra : undefined);
+    y += rowHeight;
+  });
+
+  // ---- Footer on every page --------------------------------------------------
+  const pages = doc.bufferedPageRange();
+  for (let i = 0; i < pages.count; i += 1) {
+    doc.switchToPage(pages.start + i);
+    const bottomMargin = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0; // writing inside the margin must not spawn a new page
+    const footerY = doc.page.height - 22;
+    doc
+      .fillColor(PDF_COLORS.muted)
+      .font('Helvetica')
+      .fontSize(7.5)
+      .text(`${PDF_BRAND} - ${pdfSafe(report.title)}`, left, footerY, { width: contentWidth / 2, lineBreak: false });
+    doc.text(`Page ${i + 1} of ${pages.count}`, left + contentWidth / 2, footerY, {
+      width: contentWidth / 2,
+      align: 'right',
+      lineBreak: false,
+    });
+    doc.page.margins.bottom = bottomMargin;
   }
 }

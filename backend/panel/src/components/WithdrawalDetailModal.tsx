@@ -9,6 +9,7 @@ import { ActionModal } from './ActionModal';
 import { CompleteWithdrawalModal } from './CompleteWithdrawalModal';
 import { FileViewerModal } from './FileViewerModal';
 import { CopyButton } from './CopyButton';
+import { BankCheckBox } from './BankCheck';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Field, ErrorState, ViewOnlyNote, inputClass, btnGhostClass, btnSuccessClass, btnDangerOutlineClass, btnRowClass } from './ui';
@@ -178,6 +179,8 @@ export const WithdrawalDetailModal: React.FC<WithdrawalDetailModalProps> = ({ wi
               </div>
             </div>
 
+            {withdrawal.bankCheck && <BankCheckBox check={withdrawal.bankCheck} onNavigate={onClose} />}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               <DetailSection title="Customer">
                 <DetailField label="Name">{withdrawal.customerName || '—'}</DetailField>
@@ -207,6 +210,7 @@ export const WithdrawalDetailModal: React.FC<WithdrawalDetailModalProps> = ({ wi
                       <CopyButton value={withdrawal.payoutAccountHolder} label="account holder" />
                     </DetailField>
                     <DetailField label="Bank">{withdrawal.payoutBankName || '—'}</DetailField>
+                    <DetailField label="Branch">{withdrawal.payoutBankBranch || '—'}</DetailField>
                     <DetailField label="Account Number" mono>
                       {accountNumber || '—'}
                       {/* Only the full number is worth copying - the masked one cannot be used for a transfer */}

@@ -12,6 +12,7 @@ import {
   monthlyProfitFor,
   estimateProfit,
   isDailyPlan,
+  isMonthlyPlan,
   isOpenEndedPlan,
   lockInDescription,
   formatDate,
@@ -51,6 +52,7 @@ export const EarningCalculator: React.FC<{ compact?: boolean }> = ({ compact = f
 
   // Calculation only runs when amount is valid and within plan boundaries
   const daily = plan ? isDailyPlan(plan) : false;
+  const monthly = plan ? isMonthlyPlan(plan) : false;
   const openEnded = plan ? isOpenEndedPlan(plan) : false;
   const dailyProfit = isValid && plan ? dailyProfitFor(plan, amount) : 0;
   const weeklyProfit = isValid && plan ? weeklyProfitFor(plan, amount) : 0;
@@ -312,6 +314,20 @@ export const EarningCalculator: React.FC<{ compact?: boolean }> = ({ compact = f
                       </span>
                     </div>
 
+                    {monthly && (
+                      <div className="py-2.5 flex justify-between items-center gap-3 min-w-0">
+                        <span className="text-zinc-600 dark:text-zinc-400 shrink-0">
+                          Monthly profit ({plan.profitValue}% on start date)
+                        </span>
+                        <span
+                          className="tabular-nums text-emerald-600 dark:text-emerald-400 font-semibold text-right truncate min-w-0 max-w-[60%]"
+                          title={`+${formatINR(monthlyProfit)}`}
+                        >
+                          +{formatINR(monthlyProfit)}
+                        </span>
+                      </div>
+                    )}
+
                     {daily && (
                       <>
                         <div className="py-2.5 flex justify-between items-center gap-3 min-w-0">
@@ -342,7 +358,11 @@ export const EarningCalculator: React.FC<{ compact?: boolean }> = ({ compact = f
 
                     <div className="py-2.5 flex justify-between items-center gap-3 min-w-0">
                       <span className="text-zinc-600 dark:text-zinc-400 shrink-0">
-                        {daily ? (openEnded ? `Profit in 1 year (${payingDays} days)` : `Total profit (${payingDays} days)`) : 'Expected profit'}
+                        {monthly
+                          ? `Total profit (${formatDuration(plan.durationDays)})`
+                          : daily
+                          ? (openEnded ? `Profit in 1 year (${payingDays} days)` : `Total profit (${payingDays} days)`)
+                          : 'Expected profit'}
                       </span>
                       <span
                         className="tabular-nums text-emerald-600 dark:text-emerald-400 font-semibold text-right truncate min-w-0 max-w-[60%]"
@@ -383,7 +403,7 @@ export const EarningCalculator: React.FC<{ compact?: boolean }> = ({ compact = f
               {/* Total Received / Maturity Highlight Box */}
               <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/[0.08] shadow-xs overflow-hidden min-w-0">
                 <div className="text-[11px] uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-semibold">
-                  {daily ? 'Capital + Profit' : 'Maturity Amount'} ({openEnded ? 'after 1 year' : formatDuration(plan.durationDays)})
+                  {monthly || daily ? 'Capital + Profit' : 'Maturity Amount'} ({openEnded ? 'after 1 year' : formatDuration(plan.durationDays)})
                 </div>
                 <div
                   className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 tabular-nums tracking-tight mt-1 truncate min-w-0 max-w-full"
@@ -393,7 +413,9 @@ export const EarningCalculator: React.FC<{ compact?: boolean }> = ({ compact = f
                 </div>
                 <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
                   {isValid
-                    ? daily
+                    ? monthly
+                      ? 'Profit is credited to your profit wallet on your start date each month at 6:00 AM IST and can be withdrawn any time. Your capital returns to your capital wallet in full at maturity.'
+                      : daily
                       ? openEnded
                         ? 'Profit is credited to your profit wallet every working day at 6:00 AM IST and can be withdrawn any time. Your capital keeps earning until you close the plan.'
                         : 'Profit is credited to your profit wallet every working day at 6:00 AM IST; your capital returns to your capital wallet at maturity.'

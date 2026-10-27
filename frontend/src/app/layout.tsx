@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { preconnect } from "react-dom";
 import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "@/context/ThemeContext";
+import { FloatingSupport } from "@/components/layout/FloatingSupport";
+import { RouteTransitions } from "@/components/layout/RouteTransitions";
 import "./globals.css";
 
 const plusJakartaSans = Plus_Jakarta_Sans({
@@ -24,8 +26,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MoonTech Solutions | Stock Market & Trading Training",
-  description: "Stock market and trading training for beginners and working professionals: foundations, technical analysis, derivatives and live mentorship.",
+  title: "Clyvus Ventures | Stock Market & Trading Training",
+  description: "Clyvus Ventures trains beginners and working professionals in the Indian stock market: foundations, technical analysis, derivatives and live mentor-led trading sessions.",
 };
 
 /** Origin of the API, so the browser can connect to it before the first request */
@@ -53,7 +55,10 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col font-sans">
         <ThemeProvider>
+          <RouteTransitions />
           {children}
+          {/* Support chat on every page, including home, sign-in and registration */}
+          <FloatingSupport />
         </ThemeProvider>
       </body>
     </html>

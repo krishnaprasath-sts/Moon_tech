@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, Suspense, useMemo } from 'react';
+import React, { useEffect, useState, Suspense, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -14,6 +14,7 @@ import {
   User,
   Mail,
   Phone,
+  Wrench,
   Lock,
   Gift,
   Check,
@@ -27,7 +28,7 @@ import {
 } from 'lucide-react';
 import { Logo } from '@/components/brand/Logo';
 import { Spinner } from '@/components/ui/primitives';
-import { api, ApiError, getErrorMessage } from '@/lib/api';
+import { api, ApiError, getErrorMessage, LoginInfo } from '@/lib/api';
 import { validateNewPassword } from '@/lib/format';
 import { useTheme } from '@/context/ThemeContext';
 
@@ -153,6 +154,22 @@ function RegisterContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  // Maintenance state from the admin settings: no new accounts while it is on
+  const [loginInfo, setLoginInfo] = useState<LoginInfo | null>(null);
+  const maintenance = Boolean(loginInfo?.maintenanceMode);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getLoginInfo()
+      .then((info) => {
+        if (!cancelled) setLoginInfo(info);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const clearField = (field: FieldName) =>
     setFieldErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
@@ -174,6 +191,10 @@ function RegisterContent() {
     e.preventDefault();
     if (loading) return;
     setError('');
+    if (maintenance) {
+      setError(loginInfo?.maintenanceMessage || 'New registrations are paused for maintenance. Please try again shortly.');
+      return;
+    }
 
     const errors = validateForm({ name, email, phone, password, confirmPassword, referralNumber, acceptedTerms });
     setFieldErrors(errors);
@@ -197,7 +218,8 @@ function RegisterContent() {
       await api.register({
         name: name.trim(),
         email: cleanEmail,
-        phone: cleanPhone,
+        // Indian mobile numbers are stored with the country code
+        phone: `+91${cleanPhone}`,
         password,
         confirmPassword,
         referralNumber: cleanReferral,
@@ -259,7 +281,7 @@ function RegisterContent() {
       />
 
       {/* Top Header */}
-      <header className="w-full max-w-5xl flex items-center justify-between px-2 sm:px-4 mb-6 z-10">
+      <header className="vt-auth-header w-full max-w-5xl flex items-center justify-between px-2 sm:px-4 mb-6 z-10">
         <Logo size="md" />
 
         <div className="flex items-center gap-3">
@@ -363,7 +385,7 @@ function RegisterContent() {
                 </Link>
                 <span
                   aria-current="page"
-                  className="py-2 rounded-lg font-bold text-center bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs transition"
+                  className="vt-auth-tab py-2 rounded-lg font-bold text-center bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs transition"
                 >
                   Create Account
                 </span>
@@ -386,6 +408,20 @@ function RegisterContent() {
                 </div>
               )}
 
+              {/* Maintenance: new accounts are paused */}
+              {maintenance && (
+                <div
+                  role="alert"
+                  className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-800 dark:text-amber-300 text-xs flex items-start gap-2.5 animate-fade-in"
+                >
+                  <Wrench className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                  <div>
+                    <span className="font-semibold">Under maintenance</span>
+                    <p className="text-[11px] opacity-90 whitespace-pre-line leading-relaxed">{loginInfo?.maintenanceMessage}</p>
+                  </div>
+                </div>
+              )}
+
               {/* Form */}
               <form onSubmit={handleRegister} className="space-y-5" noValidate>
                 {/* 1. Personal details */}
@@ -404,7 +440,7 @@ function RegisterContent() {
                         required
                         autoComplete="name"
                         maxLength={100}
-                        placeholder="Rahul Sharma"
+                        placeholder="Enter your full name"
                         value={name}
                         onChange={(e) => {
                           setName(e.target.value);
@@ -432,7 +468,7 @@ function RegisterContent() {
                           required
                           autoComplete="email"
                           maxLength={255}
-                          placeholder="rahul@example.com"
+                          placeholder="Enter your email address"
                           value={email}
                           onChange={(e) => {
                             setEmail(e.target.value);
@@ -452,26 +488,33 @@ function RegisterContent() {
                         Mobile number
                       </label>
                       <div className="relative">
-                        {iconBox(<Phone className="w-4 h-4" />)}
+                        {/* Country code is fixed to India (+91); only the 10-digit number is typed */}
+                        <div
+                          className="absolute inset-y-0 left-0 pl-3.5 flex items-center gap-1.5 pointer-events-none text-zinc-500 dark:text-zinc-400"
+                          aria-hidden="true"
+                        >
+                          <Phone className="w-4 h-4" />
+                          <span className="text-xs font-mono font-semibold text-zinc-700 dark:text-zinc-300">+91</span>
+                        </div>
                         <input
                           id="register-phone"
                           type="tel"
                           required
-                          autoComplete="tel"
-                          inputMode="tel"
-                          maxLength={16}
-                          placeholder="98765 43210"
+                          autoComplete="tel-national"
+                          inputMode="numeric"
+                          maxLength={10}
+                          placeholder="10-digit mobile number"
                           value={phone}
                           onChange={(e) => {
-                            // Only digits, one leading +, spaces and dashes can be typed
-                            const raw = e.target.value.replace(/[^0-9+\s-]/g, '');
-                            setPhone(raw.replace(/(?!^)\+/g, ''));
+                            // Digits only; the +91 country code is added automatically
+                            setPhone(e.target.value.replace(/\D/g, '').slice(0, 10));
                             clearField('phone');
                           }}
                           disabled={loading}
+                          aria-label="Mobile number (India, +91)"
                           aria-invalid={Boolean(fieldErrors.phone)}
                           aria-describedby={fieldErrors.phone ? 'register-phone-error' : undefined}
-                          className={inputClass(Boolean(fieldErrors.phone), 'font-mono')}
+                          className={inputClass(Boolean(fieldErrors.phone), 'font-mono !pl-[4.75rem]')}
                         />
                       </div>
                       {fieldMessage('phone')}
@@ -500,7 +543,7 @@ function RegisterContent() {
                           autoComplete="new-password"
                           minLength={8}
                           maxLength={100}
-                          placeholder="Create a password"
+                          placeholder="Create a password (min. 8 characters)"
                           value={password}
                           onChange={(e) => {
                             setPassword(e.target.value);
@@ -559,7 +602,7 @@ function RegisterContent() {
                           required
                           autoComplete="new-password"
                           maxLength={100}
-                          placeholder="Type it again"
+                          placeholder="Re-enter your password"
                           value={confirmPassword}
                           onChange={(e) => {
                             setConfirmPassword(e.target.value);
@@ -606,7 +649,7 @@ function RegisterContent() {
                         required
                         autoComplete="off"
                         maxLength={8}
-                        placeholder="RAHU1001"
+                        placeholder="Enter referral code (e.g. RAHU1001)"
                         value={referralNumber}
                         onChange={(e) => {
                           setReferralNumber(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''));
@@ -662,7 +705,7 @@ function RegisterContent() {
                 {/* Submit Button */}
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || maintenance}
                   className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-xs transition-all active:scale-[0.99] shadow-md shadow-blue-500/20 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {loading && <Spinner />}
@@ -698,7 +741,7 @@ function RegisterContent() {
       {/* Footer Navigation Link */}
       <footer className="mt-6 text-center text-xs text-zinc-500 z-10">
         <Link href="/" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition">
-          ← Back to MoonTech Homepage
+          ← Back to Clyvus Ventures Homepage
         </Link>
       </footer>
     </div>

@@ -14,6 +14,7 @@ import {
   Withdrawal,
 } from '@/lib/api';
 import { useAsyncData } from '@/lib/useAsyncData';
+import { accountEnding } from '@/components/profile/BankAccountSection';
 import { BUCKET_LABELS, formatDateTime, formatINR, parseAmount } from '@/lib/format';
 import {
   accentButtonClass,
@@ -64,6 +65,8 @@ export function WithdrawWalletModal({
 }) {
   const profileFetcher = useCallback(() => api.getProfile(token), [token]);
   const profile = useAsyncData(profileFetcher);
+  const changeRequestsFetcher = useCallback(() => api.getBankChangeRequests(token), [token]);
+  const changeRequests = useAsyncData(changeRequestsFetcher);
 
   const isCapital = bucket === 'CAPITAL';
   const available = isCapital ? summary.capitalBalance : summary.profitBalance;
@@ -80,6 +83,23 @@ export function WithdrawWalletModal({
   const methods = availableMethods(details);
   const preferred = details && methods.includes(details.preferredMethod) ? details.preferredMethod : methods[0] || null;
   const method = chosenMethod && methods.includes(chosenMethod) ? chosenMethod : preferred;
+  const pendingChange = changeRequests.data?.find((r) => r.status === 'PENDING') || null;
+  const ending = accountEnding(details?.accountNumberMasked);
+  const paidToLine =
+    method === 'BANK' && ending ? (
+      <p className="text-xs text-zinc-700 dark:text-zinc-300">
+        Paid to:{' '}
+        <span className="font-semibold text-zinc-900 dark:text-white">
+          {details?.bankName ? `${details.bankName} account` : 'Bank account'} ending {ending}
+        </span>
+      </p>
+    ) : null;
+  const pendingChangeNote = pendingChange ? (
+    <Alert tone="warning">
+      Your change to the account ending {accountEnding(pendingChange.accountNumberMasked)} is still waiting for approval.
+      This withdrawal will be paid to your current account{ending ? ` ending ${ending}` : ''}.
+    </Alert>
+  ) : null;
 
   // Capital is always withdrawn in full; profit is whatever the customer types
   let validAmount: number | null = null;
@@ -204,9 +224,11 @@ export function WithdrawWalletModal({
         <div className="space-y-4">
           {error && <Alert>{error}</Alert>}
           {breakdown(validAmount)}
+          {paidToLine}
           {destination}
+          {pendingChangeNote}
           <p className="text-[11px] text-zinc-500 leading-relaxed">
-            By confirming, you ask MoonTech to pay {formatINR(net)} to the payout details shown. The amount is reserved
+            By confirming, you ask Clyvus Ventures to pay {formatINR(net)} to the payout details shown. The amount is reserved
             immediately and the request cannot be edited once submitted.
           </p>
           <div className="flex items-center gap-3">
@@ -323,11 +345,10 @@ export function WithdrawWalletModal({
         ) : methods.length === 0 ? (
           <div className="space-y-3">
             <Alert tone="warning">
-              You have not added any bank or UPI details yet. Add your payout details so we know where to send your
-              money.
+              You have not added a bank account yet. Add your bank details so we know where to send your money.
             </Alert>
             <Link href="/profile#payout-details" className={`${accentButtonClass} w-full`}>
-              <span>Add bank / UPI details</span>
+              <span>Add bank details</span>
               <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
@@ -377,13 +398,17 @@ export function WithdrawWalletModal({
                 );
               })}
             </div>
-            <p className="text-[11px] text-zinc-500 mt-2">
-              Wrong details?{' '}
-              <Link href="/profile#payout-details" className="underline">
-                Update them in your profile
-              </Link>{' '}
-              before requesting.
-            </p>
+            {paidToLine && <div className="mt-2">{paidToLine}</div>}
+            {pendingChangeNote && <div className="mt-2">{pendingChangeNote}</div>}
+            {!pendingChange && (
+              <p className="text-[11px] text-zinc-500 mt-2">
+                Wrong account?{' '}
+                <Link href="/profile#payout-details" className="underline">
+                  Request a bank change in your profile
+                </Link>
+                . Withdrawals go to the current account until the change is approved.
+              </p>
+            )}
           </fieldset>
         )}
 

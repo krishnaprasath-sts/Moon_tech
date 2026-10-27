@@ -12,7 +12,7 @@ import { logger } from '../utils/logger.js';
  * working; the login code is additionally surfaced to the caller in development.
  */
 
-const BRAND = 'MoonTech Solutions';
+const BRAND = 'Clyvus Ventures';
 const BRAND_COLOR = '#155DFC';
 const BRAND_DARK = '#0f172a';
 
@@ -125,8 +125,8 @@ export function renderHtml(content: MailContent): string {
             <td style="padding:0 6px 16px;">
               <table role="presentation" cellpadding="0" cellspacing="0">
                 <tr>
-                  <td style="width:36px;height:36px;border-radius:10px;background:${BRAND_DARK};text-align:center;vertical-align:middle;color:#ffffff;font-size:18px;font-weight:700;">M</td>
-                  <td style="padding-left:10px;font-size:18px;font-weight:700;color:${BRAND_DARK};">MoonTech <span style="font-size:11px;font-weight:600;color:${BRAND_COLOR};letter-spacing:1px;">SOLUTIONS</span></td>
+                  <td style="width:36px;height:36px;border-radius:10px;background:${BRAND_DARK};text-align:center;vertical-align:middle;color:#ffffff;font-size:18px;font-weight:700;">C</td>
+                  <td style="padding-left:10px;font-size:18px;font-weight:700;color:${BRAND_DARK};">Clyvus <span style="font-size:11px;font-weight:600;color:${BRAND_COLOR};letter-spacing:1px;">VENTURES</span></td>
                 </tr>
               </table>
             </td>
@@ -196,6 +196,9 @@ const NOTIFICATION_LINKS: Record<NotificationType, { label: string; path: string
   [NotificationType.KYC_REJECTED]: { label: 'Update my KYC', path: '/dashboard?kyc=true' },
   [NotificationType.KYC_RESUBMISSION_REQUIRED]: { label: 'Update my KYC', path: '/dashboard?kyc=true' },
   [NotificationType.ANNOUNCEMENT]: { label: 'View notifications', path: '/notifications' },
+  [NotificationType.SUPPORT_REPLY]: { label: 'Open support chat', path: '/dashboard' },
+  [NotificationType.BANK_CHANGE_APPROVED]: { label: 'View bank details', path: '/profile' },
+  [NotificationType.BANK_CHANGE_REJECTED]: { label: 'View bank details', path: '/profile' },
 };
 
 /** Notification types that already get a dedicated, richer email elsewhere */
@@ -272,6 +275,26 @@ export class EmailService {
 
   // ------------------------------------------------------------------ account
 
+  /** Registration: the link that activates the account (valid for a limited time) */
+  public static async sendVerificationEmail(to: string, name: string, verifyUrl: string, expiryHours: number): Promise<void> {
+    await this.send(
+      to,
+      {
+        subject: `Verify your email to activate your ${BRAND} account`,
+        preheader: 'One click and your account is ready.',
+        heading: 'Verify your email address',
+        greeting: `Hi ${name},`,
+        paragraphs: [
+          'Thanks for creating your Clyvus Ventures account. Please confirm this email address so we know it is yours. Until then you cannot sign in.',
+          `The link is valid for ${expiryHours} hours. If it expires, request a new one from the sign-in page.`,
+        ],
+        cta: { label: 'Verify my email', url: verifyUrl },
+        note: 'If you did not create this account, ignore this email and nothing will happen. If the button does not work, copy this link into your browser: ' + verifyUrl,
+      },
+      `Verification email for ${to} (${name})`
+    );
+  }
+
   public static async sendWelcomeEmail(to: string, name: string, referralCode: string): Promise<void> {
     await this.send(
       to,
@@ -281,7 +304,7 @@ export class EmailService {
         heading: 'Welcome aboard',
         greeting: `Hi ${name},`,
         paragraphs: [
-          'Your MoonTech account has been created. Every sign-in is protected with a one-time code sent to this email address, so keep it safe.',
+          'Your Clyvus Ventures account has been created. Every sign-in is protected with a one-time code sent to this email address, so keep it safe.',
           'Here is what to do next:',
         ],
         steps: [
@@ -308,7 +331,7 @@ export class EmailService {
     const sent = await this.send(
       to,
       {
-        subject: `${otp} is your MoonTech sign-in code`,
+        subject: `${otp} is your Clyvus Ventures sign-in code`,
         preheader: `Your code is ${otp}. It expires in ${validity}.`,
         heading: 'Your sign-in code',
         greeting: `Hi ${name},`,
@@ -333,7 +356,7 @@ export class EmailService {
     await this.send(
       to,
       {
-        subject: `${otp} is your MoonTech password reset code`,
+        subject: `${otp} is your Clyvus Ventures password reset code`,
         preheader: `Your reset code is ${otp}. It expires in ${expiryMinutes} minutes.`,
         heading: 'Reset your password',
         paragraphs: [`Use this code to set a new password. It is valid for ${expiryMinutes} minutes and can be used once.`],
@@ -419,9 +442,62 @@ export class EmailService {
         greeting: name ? `Hi ${name},` : undefined,
         paragraphs: [message],
         cta: link ? { label: link.label, url: appUrl(link.path) } : { label: 'Open my account', url: appUrl('/dashboard') },
-        note: 'You receive these updates because you have a MoonTech account. Sign in to see the full details and your complete history.',
+        note: 'You receive these updates because you have a Clyvus Ventures account. Sign in to see the full details and your complete history.',
       },
       `Notification for ${to}: ${title}`
+    );
+  }
+
+  // ------------------------------------------------------------------ support
+
+  /** Tells the support mailbox that a customer wrote in the support chat */
+  public static async sendSupportRequestEmail(
+    to: string,
+    params: { customerName: string; customerEmail: string; customerPhone: string; topic: string; message: string }
+  ): Promise<boolean> {
+    const adminUrl = `${config.adminUrl.replace(/\/+$/, '')}/support`;
+    return await this.send(
+      to,
+      {
+        subject: `Support chat: ${params.topic} question from ${params.customerName}`,
+        preheader: params.message.slice(0, 120),
+        heading: 'New support message',
+        paragraphs: [`${params.customerName} wrote in the support chat about ${params.topic}. Reply from the admin panel.`],
+        details: [
+          { label: 'Customer', value: params.customerName },
+          { label: 'Email', value: params.customerEmail },
+          { label: 'Phone', value: params.customerPhone || '-' },
+          { label: 'Topic', value: params.topic },
+          { label: 'Message', value: params.message },
+        ],
+        cta: { label: 'Open support chat', url: adminUrl },
+        note: 'Replies are sent from the admin panel; the customer is notified in the app and by email.',
+      },
+      `Support request from ${params.customerEmail} (${params.topic}): ${params.message.slice(0, 80)}`
+    );
+  }
+
+  /** Support reply to a visitor who wrote before signing in (they have no in-app inbox) */
+  public static async sendGuestSupportReplyEmail(
+    to: string,
+    params: { name: string; topic: string; message: string }
+  ): Promise<boolean> {
+    return await this.send(
+      to,
+      {
+        subject: `Reply from ${BRAND} support (${params.topic})`,
+        preheader: params.message.slice(0, 120),
+        heading: "Our support team replied",
+        greeting: `Hi ${params.name},`,
+        paragraphs: [
+          `Thanks for writing to us about ${params.topic}. Here is our reply:`,
+          params.message,
+          "You can continue the conversation in the chat on our website, on the same browser you used before, or simply reply to this email.",
+        ],
+        cta: { label: "Visit Clyvus Ventures", url: appUrl("/") },
+        note: "You received this email because you wrote to Clyvus Ventures support from our website.",
+      },
+      `Support reply to visitor ${to} (${params.topic}): ${params.message.slice(0, 80)}`
     );
   }
 }

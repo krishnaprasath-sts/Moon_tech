@@ -1,5 +1,5 @@
 import { SystemSetting } from '../models/index.js';
-import { BadRequestError } from '../utils/errors.js';
+import { BadRequestError, ServiceUnavailableError } from '../utils/errors.js';
 import { toPaise } from '../utils/money.js';
 import { RequestMeta } from '../utils/http.js';
 import { ActivityLogService } from './activityLogService.js';
@@ -18,6 +18,8 @@ export interface AppSettings {
   bankAccountNumber: string;
   bankIfsc: string;
   bankName: string;
+  /** Branch of the company bank account (shown with the transfer details) */
+  bankBranch: string;
   bankTransferInstructions: string;
   requireKycForInvestment: boolean;
   /** Customers must have VERIFIED KYC before requesting any payout */
@@ -26,15 +28,33 @@ export interface AppSettings {
   walletMinWithdrawal: number;
   /** One-time referral commission (% of the referred customer's investment amount); 0 disables it */
   referralCommissionPercent: number;
+  /** Recurring daily referral commission (% of the referred customer's active investment per day); 0 disables it */
+  dailyReferralCommissionPercent: number;
   /** Deducted from every capital withdrawal (closing an investment or withdrawing the capital balance); 0 disables it */
   capitalWithdrawalFeePercent: number;
+  /**
+   * Maintenance mode: customers cannot sign in or create an account while it is on. Staff still
+   * sign in to the admin panel, and the daily profit / referral payout job keeps running.
+   */
+  maintenanceMode: boolean;
+  /** Shown on the customer login and registration pages while maintenance mode is on */
+  maintenanceMessage: string;
+  /** Announcement shown as a popup on the customer login page; empty = none */
+  loginAnnouncement: string;
+  /** Heading of that popup (the title of the last pushed announcement) */
+  loginAnnouncementTitle: string;
+  /**
+   * Company referral code: the one code that works before any customer exists (and keeps
+   * working). Registering with it pays no commission to anyone. 4 letters + 4 digits.
+   */
+  companyReferralCode: string;
 }
 
 const DEFAULTS: AppSettings = {
   walletMinTopup: 500,
   walletMaxTopup: 200000,
   upiId: 'moontech@upi',
-  upiPayeeName: 'Moon Tech Solutions',
+  upiPayeeName: 'Clyvus Ventures',
   upiQrImage: '',
   depositInstructions:
     'Pay the exact amount to the UPI ID shown, then submit the UPI transaction ID (UTR) along with the payment receipt.',
@@ -42,6 +62,7 @@ const DEFAULTS: AppSettings = {
   bankAccountNumber: '',
   bankIfsc: '',
   bankName: '',
+  bankBranch: '',
   bankTransferInstructions:
     'Transfer the exact amount by NEFT, IMPS or RTGS to the account shown, then submit the transfer reference (UTR) number with a screenshot or receipt.',
   // Customers must have a VERIFIED KYC before they can invest (admins can relax this in Settings).
@@ -50,7 +71,15 @@ const DEFAULTS: AppSettings = {
   walletMinWithdrawal: 500,
   // One-time commission on each amount invested by a referred customer, paid instantly to the referrer
   referralCommissionPercent: 5,
+  // Recurring daily referral commission (0.025% per day = 0.5% / month over 20 working days)
+  dailyReferralCommissionPercent: 0.025,
   capitalWithdrawalFeePercent: 5,
+  maintenanceMode: false,
+  maintenanceMessage:
+    'We are carrying out scheduled maintenance. Sign in and new registrations are paused for a short while; your investments and profit credits continue as usual.',
+  loginAnnouncement: '',
+  loginAnnouncementTitle: '',
+  companyReferralCode: 'CLYV1001',
 };
 
 const KEY_MAP: Record<keyof AppSettings, string> = {
@@ -64,12 +93,19 @@ const KEY_MAP: Record<keyof AppSettings, string> = {
   bankAccountNumber: 'bank_account_number',
   bankIfsc: 'bank_ifsc',
   bankName: 'bank_name',
+  bankBranch: 'bank_branch',
   bankTransferInstructions: 'bank_transfer_instructions',
   requireKycForInvestment: 'require_kyc_for_investment',
   requireKycForWithdrawal: 'require_kyc_for_withdrawal',
   walletMinWithdrawal: 'wallet_min_withdrawal',
   referralCommissionPercent: 'referral_commission_percent',
+  dailyReferralCommissionPercent: 'daily_referral_commission_percent',
   capitalWithdrawalFeePercent: 'capital_withdrawal_fee_percent',
+  maintenanceMode: 'maintenance_mode',
+  maintenanceMessage: 'maintenance_message',
+  loginAnnouncement: 'login_announcement',
+  loginAnnouncementTitle: 'login_announcement_title',
+  companyReferralCode: 'company_referral_code',
 };
 
 export class SettingsService {
@@ -148,16 +184,56 @@ export class SettingsService {
       bankAccountNumber: textOrEmpty(KEY_MAP.bankAccountNumber),
       bankIfsc: textOrEmpty(KEY_MAP.bankIfsc),
       bankName: textOrEmpty(KEY_MAP.bankName),
+      bankBranch: textOrEmpty(KEY_MAP.bankBranch),
       bankTransferInstructions: textOr(KEY_MAP.bankTransferInstructions, DEFAULTS.bankTransferInstructions),
       requireKycForInvestment: boolOr(KEY_MAP.requireKycForInvestment, DEFAULTS.requireKycForInvestment),
       requireKycForWithdrawal: boolOr(KEY_MAP.requireKycForWithdrawal, DEFAULTS.requireKycForWithdrawal),
       walletMinWithdrawal: numberOr(KEY_MAP.walletMinWithdrawal, DEFAULTS.walletMinWithdrawal),
       referralCommissionPercent: nonNegativeOr(KEY_MAP.referralCommissionPercent, DEFAULTS.referralCommissionPercent),
+      dailyReferralCommissionPercent: nonNegativeOr(
+        KEY_MAP.dailyReferralCommissionPercent,
+        DEFAULTS.dailyReferralCommissionPercent
+      ),
       capitalWithdrawalFeePercent: nonNegativeOr(
         KEY_MAP.capitalWithdrawalFeePercent,
         DEFAULTS.capitalWithdrawalFeePercent
       ),
+      maintenanceMode: boolOr(KEY_MAP.maintenanceMode, DEFAULTS.maintenanceMode),
+      maintenanceMessage: textOr(KEY_MAP.maintenanceMessage, DEFAULTS.maintenanceMessage),
+      loginAnnouncement: textOrEmpty(KEY_MAP.loginAnnouncement),
+      loginAnnouncementTitle: textOrEmpty(KEY_MAP.loginAnnouncementTitle),
+      companyReferralCode: textOr(KEY_MAP.companyReferralCode, DEFAULTS.companyReferralCode).toUpperCase(),
     };
+  }
+
+  /** What the customer login / registration pages need before anyone signs in */
+  public static async getLoginInfo(): Promise<{
+    maintenanceMode: boolean;
+    maintenanceMessage: string;
+    loginAnnouncement: string;
+    loginAnnouncementTitle: string;
+  }> {
+    const settings = await this.getSettings();
+    return {
+      maintenanceMode: settings.maintenanceMode,
+      maintenanceMessage: settings.maintenanceMode ? settings.maintenanceMessage : '',
+      loginAnnouncement: settings.loginAnnouncement,
+      loginAnnouncementTitle: settings.loginAnnouncement ? settings.loginAnnouncementTitle : '',
+    };
+  }
+
+  /** Called when an admin pushes an announcement: it becomes the popup on the customer login page */
+  public static async setLoginAnnouncement(title: string, message: string, adminId: number): Promise<void> {
+    await SystemSetting.upsert({ setting_key: KEY_MAP.loginAnnouncementTitle, setting_value: title.trim(), updated_by: adminId });
+    await SystemSetting.upsert({ setting_key: KEY_MAP.loginAnnouncement, setting_value: message.trim(), updated_by: adminId });
+  }
+
+  /** Throws 503 for customer sign-in / sign-up while maintenance mode is on */
+  public static async assertCustomerAccessOpen(): Promise<void> {
+    const settings = await this.getSettings();
+    if (settings.maintenanceMode) {
+      throw new ServiceUnavailableError(settings.maintenanceMessage);
+    }
   }
 
   /**
@@ -180,6 +256,7 @@ export class SettingsService {
     if (input.bankAccountNumber !== undefined) next.bankAccountNumber = input.bankAccountNumber.trim();
     if (input.bankIfsc !== undefined) next.bankIfsc = input.bankIfsc.trim().toUpperCase();
     if (input.bankName !== undefined) next.bankName = input.bankName.trim();
+    if (input.bankBranch !== undefined) next.bankBranch = input.bankBranch.trim();
     if (input.bankTransferInstructions !== undefined) next.bankTransferInstructions = input.bankTransferInstructions.trim();
 
     const bankFieldsSet = [next.bankAccountName, next.bankAccountNumber, next.bankIfsc, next.bankName].filter(Boolean).length;
@@ -198,9 +275,21 @@ export class SettingsService {
     if (input.referralCommissionPercent !== undefined) {
       next.referralCommissionPercent = input.referralCommissionPercent;
     }
+    if (input.dailyReferralCommissionPercent !== undefined) {
+      next.dailyReferralCommissionPercent = input.dailyReferralCommissionPercent;
+    }
     if (input.capitalWithdrawalFeePercent !== undefined) {
       next.capitalWithdrawalFeePercent = input.capitalWithdrawalFeePercent;
     }
+    if (input.maintenanceMode !== undefined) next.maintenanceMode = input.maintenanceMode;
+    if (input.maintenanceMessage !== undefined) {
+      next.maintenanceMessage = input.maintenanceMessage.trim() || DEFAULTS.maintenanceMessage;
+    }
+    if (input.loginAnnouncement !== undefined) next.loginAnnouncement = input.loginAnnouncement.trim();
+    if (input.loginAnnouncementTitle !== undefined) next.loginAnnouncementTitle = input.loginAnnouncementTitle.trim();
+    if (input.companyReferralCode !== undefined) next.companyReferralCode = input.companyReferralCode.trim().toUpperCase();
+    // No popup text means no popup heading either
+    if (!next.loginAnnouncement) next.loginAnnouncementTitle = '';
 
     if (toPaise(next.walletMaxTopup) < toPaise(next.walletMinTopup)) {
       throw new BadRequestError('Maximum wallet top-up must be greater than or equal to the minimum');

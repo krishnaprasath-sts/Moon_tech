@@ -8,6 +8,7 @@ import {
   WORKING_DAYS_PER_WEEK,
   istDayKey,
   maxCreditsForTerm,
+  monthlyCreditsForTerm,
   payableWorkingDays,
 } from '../utils/workingDays.js';
 import { RequestMeta } from '../utils/http.js';
@@ -29,9 +30,16 @@ export interface PlanTerms {
   duration_days?: number;
 }
 
-/** Percentage of a principal in paise; profit_value has 2 decimals so work in basis points */
+/**
+ * Percentage of a principal in paise. The percentage is taken to 4 decimal places so that a
+ * small rate like the daily referral commission (0.025%) is applied exactly: 10,000 at 0.025%
+ * is 2.50, not 3.00. Plan rates and fees have 2 decimals and are unaffected.
+ */
 export function percentOfPaise(amountPaise: number, percent: number): number {
-  return Math.round((amountPaise * toPaise(percent)) / 10000);
+  const num = Number(percent);
+  if (!Number.isFinite(num) || !Number.isFinite(amountPaise)) return 0;
+  const tenThousandths = Math.round(num * 10000); // 0.025% -> 250
+  return Math.round((amountPaise * tenThousandths) / 1000000);
 }
 
 /**
@@ -120,6 +128,10 @@ export function calculateProfitPaise(
     if (!term.maturityDate) return 0;
     return dailyProfitPaise(terms, amountPaise) * profitDaysForTerm(terms, term.startDate, term.maturityDate);
   }
+  if (terms.payout_mode === ProfitPayoutMode.MONTHLY) {
+    // One credit per whole 30-day month of the term (365 days = 12), paid on the start date anniversary
+    return percentOfPaise(amountPaise, terms.profit_value) * monthlyCreditsForTerm(Number(terms.duration_days) || 0);
+  }
   if (terms.profit_type === ProfitType.FIXED) {
     return toPaise(terms.profit_value);
   }
@@ -142,6 +154,8 @@ export function serializePlan(plan: InvestmentPlan) {
     rateBasis: plan.rate_basis,
     // 5% / month -> 0.25% per working day
     dailyRatePercent: plan.payout_mode === ProfitPayoutMode.DAILY ? dailyRatePercent(plan) : 0,
+    isMonthly: plan.payout_mode === ProfitPayoutMode.MONTHLY,
+    monthlyRatePercent: plan.payout_mode === ProfitPayoutMode.MONTHLY ? Number(plan.profit_value) : 0,
     creditsPerMonth: WORKING_DAYS_PER_MONTH,
     creditsPerWeek: WORKING_DAYS_PER_WEEK,
     isActive: Boolean(plan.is_active),
@@ -167,7 +181,7 @@ export class InvestmentPlanService {
       throw new BadRequestError('Maximum investment must be greater than or equal to the minimum investment');
     }
     if (terms.durationDays === 0 && terms.payoutMode !== ProfitPayoutMode.DAILY) {
-      throw new BadRequestError('Only daily-profit plans can be open-ended (0 days). Set a period for maturity-paid plans.');
+      throw new BadRequestError('Only daily-profit plans can be open-ended (0 days). Set a period for other plans.');
     }
     if (terms.durationDays > 0 && terms.lockInDays > terms.durationDays) {
       throw new BadRequestError('The lock-in period cannot be longer than the investment period');
@@ -181,12 +195,24 @@ export class InvestmentPlanService {
       }
       return;
     }
+    if (terms.payoutMode === ProfitPayoutMode.MONTHLY) {
+      if (terms.profitType !== ProfitType.PERCENTAGE) {
+        throw new BadRequestError('Monthly-payout plans must use a percentage profit (% of the capital)');
+      }
+      if (terms.profitValue > MAX_PERCENTAGE) {
+        throw new BadRequestError(`Profit percentage cannot exceed ${MAX_PERCENTAGE}%`);
+      }
+      return;
+    }
     if (terms.profitType === ProfitType.PERCENTAGE && terms.profitValue > MAX_PERCENTAGE) {
       throw new BadRequestError(`Profit percentage cannot exceed ${MAX_PERCENTAGE}%`);
     }
   }
 
   private static describeRate(plan: InvestmentPlan): string {
+    if (plan.payout_mode === ProfitPayoutMode.MONTHLY) {
+      return `${plan.profit_value}% per month, credited once a month on start date`;
+    }
     if (plan.payout_mode !== ProfitPayoutMode.DAILY) {
       return plan.profit_type === ProfitType.PERCENTAGE ? `${plan.profit_value}%` : `${formatInr(plan.profit_value)} fixed`;
     }

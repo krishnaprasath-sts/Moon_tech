@@ -15,7 +15,7 @@ let server: http.Server;
 async function bootstrap() {
   try {
     logger.info('==============================================');
-    logger.info('  MOON TECH SOLUTIONS | INVESTMENT PLATFORM API ');
+    logger.info('  CLYVUS VENTURES | INVESTMENT PLATFORM API ');
     logger.info('==============================================');
 
     // 0. Refuse to run in production with development secrets

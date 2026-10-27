@@ -57,6 +57,16 @@ export interface LoginResponse {
   data?: LoginSession | LoginOtpChallenge;
 }
 
+/** Public: maintenance state and announcement shown on the login / registration pages */
+export interface LoginInfo {
+  /** Customers cannot sign in or register while this is on; profit credits continue */
+  maintenanceMode: boolean;
+  maintenanceMessage: string;
+  /** Latest announcement pushed by the admin, shown as a popup; empty = none */
+  loginAnnouncement: string;
+  loginAnnouncementTitle: string;
+}
+
 // ---------------------------------------------------------------------------
 // Investment platform types
 // ---------------------------------------------------------------------------
@@ -94,9 +104,48 @@ export interface PayoutDetails {
   accountNumberMasked: string | null;
   ifscCode: string | null;
   bankName: string | null;
+  bankBranch: string | null;
   hasBankDetails: boolean;
   hasUpiDetails: boolean;
   updatedAt: string | null;
+  /** Where the current bank account came from (KYC, an approved change request, or typed in by the customer). */
+  bankSource?: BankSource | null;
+  bankVerified?: boolean;
+  bankVerifiedAt?: string | null;
+  /** True once an account is on file: further changes need an approved change request. */
+  bankLocked?: boolean;
+}
+
+export type BankSource = 'KYC' | 'CHANGE_REQUEST' | 'CUSTOMER';
+
+export type BankChangeStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+
+export interface BankChangeRequest {
+  id: number;
+  status: BankChangeStatus;
+  accountHolderName: string;
+  accountNumberMasked: string;
+  ifscCode: string;
+  bankName: string;
+  bankBranch: string;
+  reason: string | null;
+  previousAccountMasked: string | null;
+  previousBankName: string | null;
+  adminRemarks: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
+
+export interface CreateBankChangeRequestInput {
+  accountHolderName: string;
+  accountNumber: string;
+  confirmAccountNumber: string;
+  ifscCode: string;
+  bankName: string;
+  bankBranch: string;
+  reason?: string;
+  currentPassword: string;
+  proof: File;
 }
 
 export interface Profile {
@@ -107,6 +156,8 @@ export interface Profile {
   status: string;
   fullName: string | null;
   referralCode: string | null;
+  /** Public customer number, e.g. MT100042 */
+  customerId: string | null;
   dateOfBirth: string | null;
   address: string | null;
   city: string | null;
@@ -152,6 +203,7 @@ export interface ReferralSummary {
   referralCode: string;
   referredBy: string | null;
   commissionPercent: number;
+  dailyCommissionPercent?: number;
   totalReferrals: number;
   verifiedReferrals: number;
   pendingKycReferrals: number;
@@ -179,6 +231,7 @@ export interface UpdatePayoutDetailsInput {
   accountNumber?: string;
   ifscCode?: string | null;
   bankName?: string | null;
+  bankBranch?: string | null;
 }
 
 export interface WalletConfig {
@@ -195,6 +248,8 @@ export interface WalletConfig {
   bankAccountNumber: string;
   bankIfsc: string;
   bankName: string;
+  /** Branch of the company account; may be empty */
+  bankBranch: string;
   bankTransferInstructions: string;
   requireKycForInvestment: boolean;
   requireKycForWithdrawal: boolean;
@@ -337,9 +392,11 @@ export interface InvestmentPlan {
   lockInDays: number;
   profitType: ProfitType;
   profitValue: number;
-  /** AT_MATURITY: profit paid with the principal at the end. DAILY: profit credited every working day. */
+  /** AT_MATURITY: profit paid with the principal at the end. DAILY: profit credited every working day. MONTHLY: profit credited monthly on start date. */
   payoutMode: ProfitPayoutMode;
   rateBasis: RateBasis;
+  isMonthly?: boolean;
+  monthlyRatePercent?: number;
   /** Per-working-day % of the capital: 5% / month -> 0.25 */
   dailyRatePercent: number;
   creditsPerMonth: number;
@@ -352,7 +409,7 @@ export interface InvestmentPlan {
   updatedAt: string;
 }
 
-export type ProfitPayoutMode = 'AT_MATURITY' | 'DAILY';
+export type ProfitPayoutMode = 'AT_MATURITY' | 'DAILY' | 'MONTHLY';
 
 export interface InvestmentPreview {
   planId: number;
@@ -367,6 +424,7 @@ export interface InvestmentPreview {
   profitValue: number;
   payoutMode: ProfitPayoutMode;
   rateBasis: RateBasis;
+  isMonthly?: boolean;
   dailyRatePercent: number;
   /** DAILY plans: profit credited per working day / week / month and the number of paying days in the term */
   dailyProfit: number;
@@ -403,6 +461,7 @@ export interface Investment {
   profitValue: number;
   payoutMode: ProfitPayoutMode;
   rateBasis: RateBasis;
+  isMonthly?: boolean;
   dailyRatePercent: number;
   durationDays: number;
   isOpenEnded: boolean;
@@ -418,15 +477,15 @@ export interface Investment {
   profitDays: number;
   profitCredited: number;
   profitRemaining: number;
-  /** DAILY plans: number of working days already credited */
+  /** DAILY plans: number of working days already credited; MONTHLY plans: months credited */
   creditedDays: number;
   /** Monthly plans: at most this many credits per 30-day cycle (null for legacy per-day plans) */
   creditsPerCycle: number | null;
   currentCycle: number;
   creditsThisCycle: number;
-  /** DAILY plans: ISO instant of the next 6:00 AM IST credit, null once all days are paid */
+  /** DAILY/MONTHLY plans: ISO instant of the next 6:00 AM IST credit, null once all credits are paid */
   nextCreditAt: string | null;
-  /** DAILY plans: the next credit day has passed 6:00 AM and is about to be processed */
+  /** DAILY/MONTHLY plans: the next credit day has passed 6:00 AM and is about to be processed */
   nextCreditDue: boolean;
   /** Fee percent snapshotted at invest time; charged only while earlyExitFeeApplies (closing before maturity) */
   feePercent: number;
@@ -558,6 +617,8 @@ export interface KycSubmittedDetails {
   maskedAccountNumber: string | null;
   accountHolderName: string | null;
   ifscCode: string | null;
+  bankName: string | null;
+  bankBranch: string | null;
 }
 
 export interface KycStatusInfo {
@@ -752,10 +813,94 @@ export function getErrorMessage(err: unknown, fallback = 'Something went wrong. 
   return fallback;
 }
 
+// ---------------------------------------------------------------------------
+// Support chat
+// ---------------------------------------------------------------------------
+export type SupportTopic = 'KYC' | 'DEPOSIT' | 'WITHDRAWAL' | 'PLANS';
+
+export interface SupportMessage {
+  id: number;
+  userId: number;
+  topic: SupportTopic;
+  sender: 'CUSTOMER' | 'ADMIN';
+  adminUserId: number | null;
+  adminEmail: string | null;
+  message: string;
+  readByCustomer: boolean;
+  readByAdmin: boolean;
+  createdAt: string;
+}
+
+/** A visitor (not signed in) who wrote to support */
+export interface SupportGuest {
+  guestId: number;
+  name: string;
+  email: string;
+  phone: string;
+}
+
+export interface GuestSupportMessage {
+  id: number;
+  guestId: number;
+  topic: SupportTopic;
+  sender: 'CUSTOMER' | 'ADMIN';
+  message: string;
+  createdAt: string;
+}
+
+export interface GuestSendResult {
+  token: string;
+  guest: SupportGuest;
+  message: GuestSupportMessage;
+  autoReply: GuestSupportMessage | null;
+}
+
+/**
+ * One-time pass from the email verification link: the first sign-in in this browser skips the
+ * emailed login code (opening the link already proved the email). The server ignores it after
+ * the account's first sign-in or after 24 hours.
+ */
+const FIRST_LOGIN_PASS_KEY = 'clyvus_first_login_pass';
+
+function saveFirstLoginPass(token: string) {
+  try {
+    localStorage.setItem(FIRST_LOGIN_PASS_KEY, token);
+  } catch {
+    /* storage blocked: the customer simply gets the login code */
+  }
+}
+
+function readFirstLoginPass(): string | null {
+  try {
+    return localStorage.getItem(FIRST_LOGIN_PASS_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Called once a session is stored: the pass is single-use */
+export function clearFirstLoginPass() {
+  try {
+    localStorage.removeItem(FIRST_LOGIN_PASS_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export const api = {
   // Auth: Login. Returns the envelope; throws ApiError only when the server cannot be reached.
+  /** Public: maintenance state and announcement for the login / registration pages */
+  async getLoginInfo(): Promise<LoginInfo> {
+    const result = await request<LoginInfo>('/public/login-info');
+    return result.data;
+  },
+
   async login(email: string, password: string): Promise<LoginResponse> {
-    const res = await send('/auth/login', { method: 'POST', body: { email: email.trim(), password } });
+    const firstLoginToken = readFirstLoginPass();
+    const res = await send('/auth/login', {
+      method: 'POST',
+      body: { email: email.trim(), password, ...(firstLoginToken ? { firstLoginToken } : {}) },
+    });
     const json = await parseJson<LoginResponse['data']>(res);
     if (!json) throw errorFromEnvelope(res.status, null);
     return { success: res.ok && json.success !== false, message: json.message, data: json.data };
@@ -800,6 +945,22 @@ export const api = {
       },
     });
     return { success: true as const, message: result.message };
+  },
+
+  /** Activates the account behind the emailed verification link */
+  async verifyEmail(token: string): Promise<{ email: string; alreadyActive: boolean; message: string }> {
+    const result = await request<{ email: string; alreadyActive: boolean; firstLoginToken?: string }>('/auth/verify-email', {
+      method: 'POST',
+      body: { token },
+    });
+    if (result.data.firstLoginToken) saveFirstLoginPass(result.data.firstLoginToken);
+    return { email: result.data.email, alreadyActive: result.data.alreadyActive, message: result.message };
+  },
+
+  /** Emails a fresh verification link to an unverified account */
+  async resendVerification(email: string): Promise<string> {
+    const result = await request<unknown>('/auth/resend-verification', { method: 'POST', body: { email: email.trim() } });
+    return result.message;
   },
 
   // 5. Customer: Get KYC status (background check: never redirects on 401)
@@ -882,6 +1043,30 @@ export const api = {
 
   async updatePayoutDetails(token: string, input: UpdatePayoutDetailsInput): Promise<PayoutDetails> {
     return (await request<PayoutDetails>('/profile/payout-details', { method: 'PUT', token, body: input })).data;
+  },
+
+  async getBankChangeRequests(token: string): Promise<BankChangeRequest[]> {
+    const data = (await request<BankChangeRequest[]>('/profile/bank-change-requests', { token })).data;
+    return Array.isArray(data) ? data : [];
+  },
+
+  /** Multipart: bank fields + current password + the `proof` document. */
+  async createBankChangeRequest(token: string, input: CreateBankChangeRequestInput): Promise<BankChangeRequest> {
+    const formData = new FormData();
+    formData.append('accountHolderName', input.accountHolderName);
+    formData.append('accountNumber', input.accountNumber);
+    formData.append('confirmAccountNumber', input.confirmAccountNumber);
+    formData.append('ifscCode', input.ifscCode);
+    formData.append('bankName', input.bankName);
+    formData.append('bankBranch', input.bankBranch);
+    if (input.reason) formData.append('reason', input.reason);
+    formData.append('currentPassword', input.currentPassword);
+    formData.append('proof', input.proof);
+    return (await request<BankChangeRequest>('/profile/bank-change-requests', { method: 'POST', token, body: formData })).data;
+  },
+
+  async cancelBankChangeRequest(token: string, requestId: number): Promise<BankChangeRequest> {
+    return (await request<BankChangeRequest>(`/profile/bank-change-requests/${requestId}/cancel`, { method: 'POST', token })).data;
   },
 
   // -------------------------------------------------------------------------
@@ -1012,5 +1197,45 @@ export const api = {
   async markAllNotificationsRead(token: string): Promise<number> {
     const result = await request<{ updated?: number }>('/notifications/read-all', { method: 'POST', token });
     return Number(result.data?.updated) || 0;
+  },
+  // -------------------------------------------------------------------------
+  // Support chat
+  // -------------------------------------------------------------------------
+  async getSupportMessages(token: string, topic?: SupportTopic): Promise<Paginated<SupportMessage>> {
+    return requestList<SupportMessage>('/support', { token, query: { topic, limit: 100 }, noRedirect: true });
+  },
+
+  /** Sends a message; `autoReply` is the instant acknowledgement from Support when this starts a new conversation */
+  async sendSupportMessage(
+    token: string,
+    input: { topic: SupportTopic; message: string }
+  ): Promise<SupportMessage & { autoReply?: SupportMessage | null }> {
+    return (await request<SupportMessage & { autoReply?: SupportMessage | null }>('/support', { method: 'POST', token, body: input })).data;
+  },
+
+  async getSupportUnreadCount(token: string): Promise<number> {
+    const result = await request<{ unreadCount?: number }>('/support/unread-count', { token, noRedirect: true });
+    return Number(result.data?.unreadCount) || 0;
+  },
+
+  // Support chat for visitors who are not signed in (token kept in this browser only)
+  async sendGuestSupportMessage(input: {
+    token?: string;
+    name?: string;
+    email?: string;
+    phone?: string;
+    topic: SupportTopic;
+    message: string;
+  }): Promise<GuestSendResult> {
+    return (await request<GuestSendResult>('/support/guest', { method: 'POST', body: input })).data;
+  },
+
+  async getGuestSupportThread(token: string): Promise<{ guest: SupportGuest; messages: GuestSupportMessage[] }> {
+    return (await request<{ guest: SupportGuest; messages: GuestSupportMessage[] }>('/support/guest/thread', { method: 'POST', body: { token } })).data;
+  },
+
+  async getGuestSupportUnreadCount(token: string): Promise<number> {
+    const result = await request<{ unreadCount?: number }>('/support/guest/unread-count', { method: 'POST', body: { token } });
+    return Number(result.data?.unreadCount) || 0;
   },
 };

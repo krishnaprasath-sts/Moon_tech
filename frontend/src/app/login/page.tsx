@@ -11,6 +11,9 @@ import {
   UserPlus,
   CheckCircle2,
   AlertCircle,
+  Megaphone,
+  X,
+  Wrench,
   Sun,
   Moon,
   Mail,
@@ -29,7 +32,7 @@ import {
 } from 'lucide-react';
 import { Logo } from '@/components/brand/Logo';
 import { Spinner } from '@/components/ui/primitives';
-import { api, getErrorMessage, isOtpChallenge, LoginOtpChallenge, LoginSession, safeRedirectPath } from '@/lib/api';
+import { api, ApiError, clearFirstLoginPass, getErrorMessage, isOtpChallenge, LoginInfo, LoginOtpChallenge, LoginSession, safeRedirectPath } from '@/lib/api';
 import { notifyAuthChange, useAuth, useStoredItem, writeStoredItem } from '@/lib/useAuth';
 import { useTheme } from '@/context/ThemeContext';
 
@@ -79,6 +82,26 @@ function LoginContent() {
   const [resendIn, setResendIn] = useState(0);
   const [resending, setResending] = useState(false);
   const [notice, setNotice] = useState('');
+  // Set when sign-in is refused because the email address was never verified
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
+  const [resendingLink, setResendingLink] = useState(false);
+  // Announcement and maintenance state from the admin settings, read before anyone signs in
+  const [loginInfo, setLoginInfo] = useState<LoginInfo | null>(null);
+  const maintenance = Boolean(loginInfo?.maintenanceMode);
+  // The latest announcement opens as a popup once per browser session (per announcement text)
+  const [announcementOpen, setAnnouncementOpen] = useState(false);
+  const announcementKey = loginInfo?.loginAnnouncement
+    ? `login-announcement-seen:${loginInfo.loginAnnouncementTitle}|${loginInfo.loginAnnouncement}`
+    : null;
+  const dismissAnnouncement = () => {
+    setAnnouncementOpen(false);
+    if (!announcementKey) return;
+    try {
+      sessionStorage.setItem(announcementKey, '1');
+    } catch {
+      // ignore
+    }
+  };
   const otpInputRef = useRef<HTMLInputElement>(null);
   const challengeStartedAt = useRef(0);
 
@@ -92,6 +115,30 @@ function LoginContent() {
       router.replace(destination);
     }
   }, [authLoading, token, destination, router]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getLoginInfo()
+      .then((info) => {
+        if (cancelled) return;
+        setLoginInfo(info);
+        // Open the popup unless this exact announcement was already dismissed in this browser session
+        if (info.loginAnnouncement) {
+          let seen = false;
+          try {
+            seen = Boolean(sessionStorage.getItem(`login-announcement-seen:${info.loginAnnouncementTitle}|${info.loginAnnouncement}`));
+          } catch {
+            seen = false;
+          }
+          if (!seen) setAnnouncementOpen(true);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Expiry and resend countdowns, derived from the server's timestamps
   useEffect(() => {
@@ -116,6 +163,7 @@ function LoginContent() {
   };
 
   const storeSession = (session: LoginSession, cleanEmail: string) => {
+    clearFirstLoginPass();
     writeStoredItem(SAVED_EMAIL_KEY, rememberMe ? cleanEmail : null);
     localStorage.setItem('accessToken', session.accessToken);
     localStorage.setItem('user', JSON.stringify(session.user));
@@ -127,6 +175,11 @@ function LoginContent() {
     if (loading) return;
     setError('');
     setNotice('');
+
+    if (maintenance) {
+      setError(loginInfo?.maintenanceMessage || 'Sign in is paused for maintenance. Please try again shortly.');
+      return;
+    }
 
     const cleanEmail = email.trim();
     if (!cleanEmail || !password) {
@@ -155,7 +208,24 @@ function LoginContent() {
       storeSession(data.data, cleanEmail);
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'Unable to sign in. Please check your credentials and try again.'));
+      const notVerified = err instanceof ApiError && err.errors.some((e) => e.field === 'emailVerification');
+      setUnverifiedEmail(notVerified ? cleanEmail : null);
       setLoading(false);
+    }
+  };
+
+  const resendVerificationLink = async () => {
+    if (!unverifiedEmail || resendingLink) return;
+    setResendingLink(true);
+    setError('');
+    try {
+      const message = await api.resendVerification(unverifiedEmail);
+      setNotice(message);
+      setUnverifiedEmail(null);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Unable to send a new link. Please try again.'));
+    } finally {
+      setResendingLink(false);
     }
   };
 
@@ -224,8 +294,58 @@ function LoginContent() {
   const themeLabel = `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`;
   const expired = Boolean(challenge) && secondsLeft <= 0;
 
+  const announcementPopup =
+    announcementOpen && loginInfo?.loginAnnouncement ? (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-sm animate-fade-in"
+        role="presentation"
+        onClick={dismissAnnouncement}
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="login-announcement-title"
+          className="w-full max-w-md rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 shadow-2xl overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-5 py-4 bg-blue-600 text-white flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <Megaphone className="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" />
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-wider font-semibold text-blue-100">Announcement</p>
+                <h2 id="login-announcement-title" className="text-sm font-bold break-words">
+                  {loginInfo.loginAnnouncementTitle || 'A message from Clyvus Ventures'}
+                </h2>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={dismissAnnouncement}
+              aria-label="Close announcement"
+              className="p-1 rounded-lg text-blue-100 hover:text-white hover:bg-white/10 transition shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="px-5 py-4 text-xs text-zinc-700 dark:text-zinc-300 whitespace-pre-line leading-relaxed max-h-[50vh] overflow-y-auto">
+            {loginInfo.loginAnnouncement}
+          </div>
+          <div className="px-5 pb-4">
+            <button
+              type="button"
+              onClick={dismissAnnouncement}
+              className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null;
+
   return (
     <div className="min-h-screen bg-[var(--bg-base)] text-[var(--text-primary)] flex flex-col justify-between items-center p-4 sm:p-6 lg:p-8 transition-colors duration-200 relative overflow-hidden">
+      {announcementPopup}
       {/* Dynamic Ambient Background Glows */}
       <div
         className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[800px] h-[450px] rounded-full blur-[140px] opacity-25 dark:opacity-20"
@@ -241,7 +361,7 @@ function LoginContent() {
       />
 
       {/* Top Header */}
-      <header className="w-full max-w-5xl flex items-center justify-between px-2 sm:px-4 mb-6 z-10">
+      <header className="vt-auth-header w-full max-w-5xl flex items-center justify-between px-2 sm:px-4 mb-6 z-10">
         <Logo size="md" />
 
         <div className="flex items-center gap-3">
@@ -349,7 +469,7 @@ function LoginContent() {
               <div className="grid grid-cols-2 p-1 bg-zinc-100 dark:bg-zinc-900/90 border border-zinc-200 dark:border-white/[0.07] rounded-xl text-xs mb-6">
                 <span
                   aria-current="page"
-                  className="py-2 rounded-lg font-bold text-center bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs transition"
+                  className="vt-auth-tab py-2 rounded-lg font-bold text-center bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs transition"
                 >
                   Sign In
                 </span>
@@ -496,8 +616,11 @@ function LoginContent() {
                     >
                       <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                       <div>
-                        <span className="font-semibold">Account created successfully!</span>
-                        <p className="text-[11px] opacity-90">Enter your password. We will then email you a sign-in code.</p>
+                        <span className="font-semibold">Account created! One more step.</span>
+                        <p className="text-[11px] opacity-90">
+                          We emailed a verification link to {email || 'your address'}. Click it to activate your account, then sign in here.
+                          Check the spam folder if it does not arrive within a minute.
+                        </p>
                       </div>
                     </div>
                   )}
@@ -516,6 +639,33 @@ function LoginContent() {
                     </div>
                   )}
 
+                  {/* Announcement from the admin: a short reminder line; the full text opens as a popup */}
+                  {loginInfo?.loginAnnouncement && !announcementOpen && (
+                    <button
+                      type="button"
+                      onClick={() => setAnnouncementOpen(true)}
+                      className="mb-5 w-full text-left p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-800 dark:text-blue-300 text-xs flex items-center gap-2.5 hover:bg-blue-500/15 transition"
+                    >
+                      <Megaphone className="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                      <span className="font-semibold truncate">{loginInfo.loginAnnouncementTitle || 'Announcement'}</span>
+                      <span className="ml-auto text-[11px] underline shrink-0">Read</span>
+                    </button>
+                  )}
+
+                  {/* Maintenance: sign in and registration are paused */}
+                  {maintenance && (
+                    <div
+                      role="alert"
+                      className="mb-5 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-800 dark:text-amber-300 text-xs flex items-start gap-2.5 animate-fade-in"
+                    >
+                      <Wrench className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                      <div>
+                        <span className="font-semibold">Under maintenance</span>
+                        <p className="text-[11px] opacity-90 whitespace-pre-line leading-relaxed">{loginInfo?.maintenanceMessage}</p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Error Message */}
                   {error && (
                     <div
@@ -524,6 +674,30 @@ function LoginContent() {
                     >
                       <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
                       <span>{error}</span>
+                    </div>
+                  )}
+
+                  {unverifiedEmail && (
+                    <div className="mb-5 -mt-3 flex items-center justify-between gap-3 text-xs">
+                      <span className="text-zinc-500 dark:text-zinc-400">Did not get the link?</span>
+                      <button
+                        type="button"
+                        onClick={resendVerificationLink}
+                        disabled={resendingLink}
+                        className="font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                      >
+                        {resendingLink ? 'Sending...' : 'Resend verification email'}
+                      </button>
+                    </div>
+                  )}
+
+                  {notice && !challenge && (
+                    <div
+                      role="status"
+                      className="mb-5 p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 text-xs flex items-center gap-2.5 animate-fade-in"
+                    >
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>{notice}</span>
                     </div>
                   )}
 
@@ -625,7 +799,7 @@ function LoginContent() {
                       <div className="w-full border-t border-zinc-200 dark:border-white/[0.08]" />
                     </div>
                     <div className="relative flex justify-center text-[11px]">
-                      <span className="bg-white dark:bg-[#111114] px-3 text-zinc-400 dark:text-zinc-500 font-medium">New to MoonTech?</span>
+                      <span className="bg-white dark:bg-[#111114] px-3 text-zinc-400 dark:text-zinc-500 font-medium">New to Clyvus Ventures?</span>
                     </div>
                   </div>
 
@@ -654,7 +828,7 @@ function LoginContent() {
       {/* Footer Navigation Link */}
       <footer className="mt-6 text-center text-xs text-zinc-500 z-10">
         <Link href="/" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition">
-          ← Back to MoonTech Homepage
+          ← Back to Clyvus Ventures Homepage
         </Link>
       </footer>
     </div>

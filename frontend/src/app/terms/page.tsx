@@ -4,8 +4,8 @@ import { ArrowLeft, ShieldCheck } from 'lucide-react';
 import { Logo } from '@/components/brand/Logo';
 
 export const metadata: Metadata = {
-  title: 'Terms and Conditions | Moon Tech Solutions',
-  description: 'Terms and conditions for opening and using a Moon Tech Solutions account.',
+  title: 'Terms and Conditions | Clyvus Ventures',
+  description: 'Terms and conditions for opening and using a Clyvus Ventures account.',
 };
 
 const SECTIONS: { title: string; items: string[] }[] = [
@@ -91,7 +91,7 @@ export default function TermsPage() {
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-zinc-950 dark:text-white tracking-tight">Terms and Conditions</h1>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-              These terms apply to every Moon Tech Solutions account. By registering you agree to them.
+              These terms apply to every Clyvus Ventures account. By registering you agree to them.
             </p>
           </div>
         </div>
@@ -116,7 +116,7 @@ export default function TermsPage() {
 
       <footer className="mt-6 text-center text-xs text-zinc-500">
         <Link href="/" className="hover:text-zinc-900 dark:hover:text-zinc-200 transition">
-          ← Back to MoonTech Homepage
+          ← Back to Clyvus Ventures Homepage
         </Link>
       </footer>
     </div>

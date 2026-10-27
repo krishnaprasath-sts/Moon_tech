@@ -6,6 +6,7 @@ import { logger } from '../utils/logger.js';
 import { toIso } from '../utils/dates.js';
 import { RequestMeta, getPagination, buildMeta } from '../utils/http.js';
 import { ActivityLogService } from './activityLogService.js';
+import { SettingsService } from './settingsService.js';
 import { EmailService } from './emailService.js';
 import { AnnouncementInput } from '../validators/financeValidators.js';
 
@@ -152,6 +153,11 @@ export class NotificationService {
           related_id: announcement.id,
         }))
       );
+    }
+
+    // The latest pushed announcement also greets visitors as a popup on the login page
+    if (input.showOnLoginPage !== false) {
+      await SettingsService.setLoginAnnouncement(input.title, input.message, adminId);
     }
 
     await ActivityLogService.log({

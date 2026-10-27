@@ -31,6 +31,8 @@ import {
   latestPayableDay,
   nextPayoutInstant,
   istTimeOnDay,
+  monthlyDueDates,
+  monthlyCreditsForTerm,
 } from '../src/utils/workingDays.js';
 import {
   investSchema,
@@ -46,6 +48,8 @@ import { identityHash } from '../src/utils/identityHash.js';
 import { ProfitType, ProfitPayoutMode, RateBasis, WalletBucket } from '../src/types/index.js';
 import { createCustomerSchema, ageOn } from '../src/validators/authValidators.js';
 import { capitalFeePaise, capitalWithdrawalBreakdown } from '../src/services/investmentService.js';
+import { customerIdFor } from '../src/utils/customerId.js';
+import { AuthService } from '../src/services/authService.js';
 
 // Frontend mirrored functions for parity checks
 import {
@@ -181,6 +185,69 @@ assert(
   'Deposit Plan: 1,00,000 at 6% / month earns 72,000 in a year (300 x 240), not 73,200',
   calculateProfitPaise(yearDepositTerms, lakhPaise, { startDate: yearStart, maturityDate: yearEnd }) === 7200000
 );
+
+// Monthly payout mode (Deposit Plan: 6% once a month on start date anniversary)
+const monthlyDepositPlan = {
+  profit_type: ProfitType.PERCENTAGE,
+  profit_value: 6,
+  payout_mode: ProfitPayoutMode.MONTHLY,
+  rate_basis: RateBasis.PER_MONTH,
+  duration_days: 365,
+};
+const tenKPaise = 1000000; // 10,000 in paise
+assert('Returns', 'Deposit Plan (MONTHLY): 10,000 at 6%/month earns 7,200 in a year (600 x 12)', calculateProfitPaise(monthlyDepositPlan, tenKPaise) === 720000);
+assert('Returns', 'Deposit Plan (MONTHLY): 1,00,000 at 6%/month earns 72,000 in a year (6,000 x 12)', calculateProfitPaise(monthlyDepositPlan, lakhPaise) === 7200000);
+
+// monthlyDueDates anniversary dates check
+const dueMonth1 = monthlyDueDates('2026-10-24', 365, '2026-11-24');
+assert('Returns', 'monthlyDueDates: month 1 is due on 2026-11-24', dueMonth1.length === 1 && dueMonth1[0].dayKey === '2026-11-24');
+const dueAll = monthlyDueDates('2026-10-24', 365, '2027-10-24');
+assert('Returns', 'monthlyDueDates: full 365 days term pays exactly 12 monthly credits', dueAll.length === 12);
+assert('Returns', 'monthlyDueDates: handles end-of-month clamping (Jan 31 -> Feb 28)', monthlyDueDates('2026-01-31', 365, '2026-02-28')[0]?.dayKey === '2026-02-28');
+// A 365-day term that crosses Feb 29 (2028) matures one day BEFORE the 12th anniversary: the
+// 12th credit must still be paid, on the last day of the term, so expected profit (12 x 6%) is met
+const leapStart = '2027-10-24';
+const leapMaturity = addDaysToKey(leapStart, 365); // 2028-10-23
+const leapDue = monthlyDueDates(leapStart, 365, leapMaturity);
+assert(
+  'Returns',
+  'monthlyDueDates: 365-day term across a leap day still pays 12 credits by maturity (12th on the last day)',
+  leapMaturity === '2028-10-23' && leapDue.length === 12 && leapDue[11].dayKey === '2028-10-23' && leapDue[10].dayKey === '2028-09-24',
+  `maturity ${leapMaturity}, ${leapDue.length} credits, last ${leapDue[leapDue.length - 1]?.dayKey}`
+);
+assert('Returns', 'monthlyDueDates: nothing is due before the first anniversary', monthlyDueDates('2026-10-24', 365, '2026-11-23').length === 0);
+assert('Returns', 'monthlyCreditsForTerm: whole months only (365 -> 12, 45 -> 1, 60 -> 2, 15 -> 1)', [365, 45, 60, 15].map(monthlyCreditsForTerm).join() === '12,1,2,1');
+assert(
+  'Returns',
+  'Deposit Plan (MONTHLY): frontend estimate matches the server total (10,000 -> 7,200)',
+  estimateProfit({ profitType: 'PERCENTAGE', profitValue: 6, payoutMode: 'MONTHLY', durationDays: 365, rateBasis: 'PER_MONTH' }, 10000) === 7200
+);
+
+// Daily referral commission: 0.025% on the same paying calendar as daily profit = 0.5% a month, 6% a year
+const refStart = '2026-10-24';
+const refDays = payableWorkingDays(refStart, addDaysToKey(refStart, 365), 20, maxCreditsForTerm(365));
+assert('Referral', 'daily referral commission pays 240 working days over a 365-day term (12 x 20)', refDays.length === 240, `${refDays.length}`);
+assert(
+  'Referral',
+  '10,000 referred investment earns 2.50 a day = 50 a month (0.5%) = 600 a year',
+  percentOfPaise(1000000, 0.025) === 250 && 250 * 20 === 5000 && 250 * refDays.length === 60000,
+  `per day ${percentOfPaise(1000000, 0.025)} paise`
+);
+assert('Referral', '1,00,000 referred investment earns 25.00 a day at 0.025%', percentOfPaise(10000000, 0.025) === 2500);
+assert('Referral', 'percentOfPaise keeps 2-decimal rates unchanged (1,00,000 at 5% = 5,000; at 6% = 6,000)', percentOfPaise(10000000, 5) === 500000 && percentOfPaise(10000000, 6) === 600000);
+assert('Referral', 'percentOfPaise handles a 0 or invalid rate', percentOfPaise(10000000, 0) === 0 && percentOfPaise(10000000, NaN) === 0);
+assert('Referral', 'at most 20 referral credits in the first 30-day cycle', payableWorkingDays(refStart, addDaysToKey(refStart, 30), 20, maxCreditsForTerm(365)).length === 20);
+assert('Referral', 'open-ended investments keep paying the referral commission (no total cap)', payableWorkingDays(refStart, addDaysToKey(refStart, 400), 20, maxCreditsForTerm(0)).length > 240);
+
+// Customer IDs: MT + 6 digits derived from the user id, unique and stable
+assert('Customer', 'customerIdFor(1) is MT100001 and customerIdFor(42) is MT100042', customerIdFor(1) === 'MT100001' && customerIdFor(42) === 'MT100042');
+assert('Customer', 'customer IDs are unique per user id', new Set([1, 2, 3, 99999].map(customerIdFor)).size === 4);
+
+// Mobile numbers: +91 added at registration; login accepts any spelling of the same number
+const variants = AuthService.phoneVariants('+919876543210');
+assert('Customer', 'phoneVariants covers bare, +91, 91 and 0 prefixed spellings', ['9876543210', '+919876543210', '919876543210', '09876543210'].every((v) => variants.includes(v)), variants.join(','));
+assert('Customer', 'phoneVariants of a bare 10-digit number includes the +91 form', AuthService.phoneVariants('98765 43210').includes('+919876543210'));
+assert('Customer', 'phoneVariants of an email-like identifier is just itself', AuthService.phoneVariants('user@example.com').join() === 'user@example.com');
 assert(
   'Returns',
   'termCreditCap: legacy per-day plans and open-ended plans have no total cap',

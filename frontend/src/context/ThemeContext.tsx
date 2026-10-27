@@ -1,12 +1,14 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useSyncExternalStore } from 'react';
+import { runThemeTransition, ThemeToggleSource } from '@/lib/themeTransition';
 
 type Theme = 'dark' | 'light';
 
 interface ThemeContextType {
   theme: Theme;
-  toggleTheme: () => void;
+  /** Pass the click event so the new theme spreads out from the button */
+  toggleTheme: (source?: ThemeToggleSource) => void;
   setTheme: (theme: Theme) => void;
 }
 
@@ -71,7 +73,13 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     () => ({
       theme,
       setTheme,
-      toggleTheme: () => setTheme(theme === 'dark' ? 'light' : 'dark'),
+      toggleTheme: (source?: ThemeToggleSource) => {
+        const next: Theme = theme === 'dark' ? 'light' : 'dark';
+        runThemeTransition(() => {
+          setTheme(next);
+          applyTheme(next);
+        }, source);
+      },
     }),
     [theme, setTheme]
   );

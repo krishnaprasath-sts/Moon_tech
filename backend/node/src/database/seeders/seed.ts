@@ -73,18 +73,18 @@ export async function seedDailyProfitPlans(): Promise<void> {
     {
       name: 'Deposit Plan',
       description:
-        'A one-year plan that earns 6% of your capital every month (72% over the year), paid into your profit wallet every working day (Monday to Friday) at 6:00 AM as 20 equal credits a month. Withdraw your profit any time. Your capital returns to your capital wallet at maturity with no fee; you can also close the plan earlier, less the early withdrawal fee.',
+        'A one-year plan that earns 6% of your capital every month (72% over the year), paid into your profit wallet once every month on your investment start date at 6:00 AM. Withdraw your profit any time. Your capital returns to your capital wallet at maturity with no fee; you can also close the plan earlier, less the early withdrawal fee.',
       min_amount: 5000,
       max_amount: 1000000,
       duration_days: 365,
       lock_in_days: 0,
       profit_type: ProfitType.PERCENTAGE,
       profit_value: 6,
-      payout_mode: ProfitPayoutMode.DAILY,
+      payout_mode: ProfitPayoutMode.MONTHLY,
       rate_basis: RateBasis.PER_MONTH,
       is_active: true,
       is_featured: true,
-      featured_tagline: '6% monthly profit on a one-year deposit.',
+      featured_tagline: '6% monthly profit credited on your start date each month. 1-year term.',
       sort_order: 1,
     },
   ]);
@@ -225,9 +225,9 @@ export async function seedDatabase(): Promise<void> {
         <text x="100" y="240" fill="#94a3b8" font-size="18" font-family="Arial">Identity / Account Reference:</text>
         <text x="350" y="240" fill="#38bdf8" font-size="20" font-family="monospace">XXXX-XXXX-1234</text>
         <text x="100" y="300" fill="#94a3b8" font-size="18" font-family="Arial">Issuing Authority / Bank:</text>
-        <text x="350" y="300" fill="#f8fafc" font-size="18" font-family="Arial">MOON TECH VERIFIED RECORD</text>
+        <text x="350" y="300" fill="#f8fafc" font-size="18" font-family="Arial">CLYVUS VENTURES VERIFIED RECORD</text>
         <rect x="100" y="360" width="600" height="70" rx="8" fill="#1e1b4b" stroke="#6366f1" stroke-width="1"/>
-        <text x="400" y="405" fill="#a5b4fc" font-size="16" font-family="Arial" text-anchor="middle">Confidential Document — Strictly Protected under Moon Tech Security Architecture</text>
+        <text x="400" y="405" fill="#a5b4fc" font-size="16" font-family="Arial" text-anchor="middle">Confidential Document — Strictly Protected under Clyvus Ventures Security Architecture</text>
       </svg>`;
       await fs.writeFile(sampleDocPath, sampleSvg);
     } catch (e) {
@@ -428,7 +428,7 @@ export async function seedDatabase(): Promise<void> {
           action: 'SYSTEM_INITIALIZED',
           entity: 'SYSTEM',
           entity_id: '1',
-          description: 'Moon Tech Solutions investment platform initialized with security parameters',
+          description: 'Clyvus Ventures investment platform initialized with security parameters',
           ip_address: '127.0.0.1',
           user_agent: 'Antigravity/Node-Bootstrap',
         },

@@ -16,6 +16,7 @@ import { notifyAuthChange, useAuth } from '@/lib/useAuth';
 import { useAsyncData } from '@/lib/useAsyncData';
 import { formatDate, formatDateTime, formatINR, humanize, validateNewPassword } from '@/lib/format';
 import { KycStatusCard } from '@/components/kyc/KycStatusCard';
+import { BankAccountSection } from '@/components/profile/BankAccountSection';
 
 function CopyCodeButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
@@ -133,6 +134,8 @@ export default function ProfilePage() {
 
   const profile = savedProfile || profileQuery.data;
   const payoutDetails = savedPayout || profile?.payoutDetails || null;
+  // Once an account is on file it can only be changed through an approved change request
+  const bankLocked = Boolean(payoutDetails && (payoutDetails.bankLocked ?? payoutDetails.accountNumberMasked));
 
   const kycStatus = kyc.data?.status || 'DRAFT';
   const kycRequired = Boolean(wallet.data?.config.requireKycForInvestment);
@@ -166,7 +169,7 @@ export default function ProfilePage() {
                 {(profile.fullName || profile.email).slice(0, 1).toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">
-                <h2 className="text-base font-bold text-zinc-950 dark:text-white truncate">{profile.fullName || 'MoonTech investor'}</h2>
+                <h2 className="text-base font-bold text-zinc-950 dark:text-white truncate">{profile.fullName || 'Clyvus Ventures member'}</h2>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">{profile.email}</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -181,6 +184,14 @@ export default function ProfilePage() {
             </div>
             <dl className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-zinc-100 dark:divide-white/[0.06] text-xs">
               <div className="p-5"><dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Mobile</dt><dd className="mt-1 font-medium font-mono text-zinc-900 dark:text-zinc-100">{profile.phone || 'Not provided'}</dd></div>
+              <div className="p-5">
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Customer ID</dt>
+                <dd className="mt-1 font-mono font-medium text-zinc-900 dark:text-zinc-100 flex items-center gap-2 flex-wrap">
+                  <span className="select-all">{profile.customerId || '—'}</span>
+                  {profile.customerId && <CopyCodeButton value={profile.customerId} />}
+                </dd>
+                <dd className="mt-1 text-[11px] text-zinc-500">Quote this ID when you contact support.</dd>
+              </div>
               <div className="p-5">
                 <dt className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Referral code</dt>
                 <dd className="mt-1 font-mono font-medium text-zinc-900 dark:text-zinc-100 flex items-center gap-2 flex-wrap">
@@ -265,14 +276,30 @@ export default function ProfilePage() {
             <SectionTitle
               icon={<Building2 className="w-5 h-5" />}
               title="Bank account details"
-              description="Withdrawals are paid to these details. Make sure they belong to you and are correct."
+              description={
+                bankLocked
+                  ? 'Withdrawals are paid to this account. Changes are checked by our team before they take effect.'
+                  : 'Withdrawals are paid to these details. Make sure they belong to you and are correct.'
+              }
             />
-            <PayoutDetailsForm
-              token={token}
-              details={payoutDetails}
-              defaultHolderName={profile.fullName || ''}
-              onSaved={setSavedPayout}
-            />
+            {bankLocked && payoutDetails ? (
+              <BankAccountSection
+                token={token}
+                details={payoutDetails}
+                defaultHolderName={profile.fullName || ''}
+                onAccountChanged={() => {
+                  setSavedPayout(null);
+                  profileQuery.reload();
+                }}
+              />
+            ) : (
+              <PayoutDetailsForm
+                token={token}
+                details={payoutDetails}
+                defaultHolderName={profile.fullName || ''}
+                onSaved={setSavedPayout}
+              />
+            )}
           </section>
 
           {/* Change password */}
@@ -452,6 +479,7 @@ function PayoutDetailsForm({
   const [accountNumber, setAccountNumber] = useState('');
   const [ifscCode, setIfscCode] = useState(details?.ifscCode || '');
   const [bankName, setBankName] = useState(details?.bankName || '');
+  const [bankBranch, setBankBranch] = useState(details?.bankBranch || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [invalidField, setInvalidField] = useState<'holder' | 'account' | 'ifsc' | null>(null);
@@ -510,6 +538,7 @@ function PayoutDetailsForm({
       accountHolderName: cleanHolder || null,
       ifscCode: cleanIfsc || null,
       bankName: cleanBank || null,
+      bankBranch: bankBranch.trim() || null,
     };
     // Leaving the account number blank keeps the stored one
     if (cleanAccount) input.accountNumber = cleanAccount;
@@ -538,7 +567,10 @@ function PayoutDetailsForm({
         </Alert>
       )}
 
-      <p className={helpTextClass}>Withdrawals are paid to this bank account after admin verification.</p>
+      <Alert tone="info">
+        Withdrawals are paid to this bank account. Please check the details carefully: once saved, any future change
+        needs a proof document and approval from our team. If you complete KYC, the bank account from your KYC is used.
+      </Alert>
 
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -574,6 +606,10 @@ function PayoutDetailsForm({
         <div>
           <label htmlFor="payout-bank" className={labelClass}>Bank name</label>
           <input id="payout-bank" type="text" maxLength={100} autoComplete="off" placeholder="e.g. HDFC Bank" value={bankName} onChange={(e) => setBankName(e.target.value)} disabled={saving} className={inputClass} />
+        </div>
+        <div>
+          <label htmlFor="payout-branch" className={labelClass}>Bank branch</label>
+          <input id="payout-branch" type="text" maxLength={100} autoComplete="off" placeholder="e.g. Anna Nagar, Chennai" value={bankBranch} onChange={(e) => setBankBranch(e.target.value)} disabled={saving} className={inputClass} />
         </div>
       </div>
 

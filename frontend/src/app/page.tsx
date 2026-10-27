@@ -6,9 +6,10 @@ import { FeaturesSection } from '@/components/home/FeaturesSection';
 import { FaqSection } from '@/components/home/FaqSection';
 import { CtaSection } from '@/components/home/CtaSection';
 import { Footer } from '@/components/layout/Footer';
+import { ScrollReveal } from '@/components/home/ScrollReveal';
 
 /**
- * Public home page: MoonTech as a stock market and trading training company. Plans, the
+ * Public home page: Clyvus Ventures as a stock market and trading training company. Plans, the
  * calculator and wallet features are only shown after login, and the word "invest" never
  * appears before login.
  */
@@ -27,6 +28,7 @@ export default function HomePage() {
       </main>
 
       <Footer />
+      <ScrollReveal />
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { FileService } from './fileService.js';
 import { ActivityLogService } from './activityLogService.js';
 import { EmailService } from './emailService.js';
 import { identityHash } from '../utils/identityHash.js';
+import { BankAccountService, accountFingerprint } from './bankAccountService.js';
 import { KycSubmitInput, ManualKycSubmitInput, KycVerifyInput, KycRejectInput, KycResubmitInput } from '../validators/kycValidators.js';
 
 /** Plain-language guidance shown to the customer for each KYC state. */
@@ -46,7 +47,7 @@ export class KycService {
     if (clash) {
       const what = panHash && clash.pan_hash === panHash ? 'PAN' : 'Aadhaar';
       throw new BadRequestError(
-        `This ${what} is already registered with another MoonTech account. Only one account per person is allowed; please contact support if this is a mistake.`
+        `This ${what} is already registered with another Clyvus Ventures account. Only one account per person is allowed; please contact support if this is a mistake.`
       );
     }
   }
@@ -101,6 +102,8 @@ export class KycService {
         maskedAccountNumber: kyc.bank_account_last4 ? maskBankAccount(`XXXXXXXX${kyc.bank_account_last4}`) : null,
         accountHolderName: kyc.account_holder_name,
         ifscCode: kyc.ifsc_code,
+        bankBranch: kyc.bank_branch,
+        bankName: kyc.bank_name,
       },
       // Review timeline (customer-facing: no reviewer identities)
       history: reviews.map((rev) => ({
@@ -198,6 +201,9 @@ export class KycService {
     kyc.bank_account_last4 = bankLast4;
     kyc.account_holder_name = input.accountHolderName.trim();
     kyc.ifsc_code = input.ifsc.toUpperCase().trim();
+    kyc.bank_branch = input.bankBranch.trim();
+    kyc.bank_name = input.bankName.trim();
+    kyc.bank_account_hash = accountFingerprint(input.accountNumber);
     kyc.passbook_document = passbookDocName;
     kyc.pan_document = panDocName;
     kyc.aadhaar_document = aadhaarDocName;
@@ -206,6 +212,9 @@ export class KycService {
     kyc.rejection_reason = null;
 
     await kyc.save();
+
+    // First bank account on file comes from KYC (an existing one is replaced only when the KYC is verified)
+    await BankAccountService.syncFromKyc(kyc, { verified: false });
 
     // Audit log
     await ActivityLogService.log({
@@ -227,6 +236,8 @@ export class KycService {
       bankAccountLast4: kyc.bank_account_last4,
       accountHolderName: kyc.account_holder_name,
       ifscCode: kyc.ifsc_code,
+      bankBranch: kyc.bank_branch,
+      bankName: kyc.bank_name,
     };
   }
 
@@ -304,6 +315,9 @@ export class KycService {
     kyc.bank_account_last4 = bankLast4;
     kyc.account_holder_name = input.accountHolderName.trim();
     kyc.ifsc_code = input.ifsc.toUpperCase().trim();
+    kyc.bank_branch = input.bankBranch.trim();
+    kyc.bank_name = input.bankName.trim();
+    kyc.bank_account_hash = accountFingerprint(input.accountNumber);
     kyc.passbook_document = passbookDocName;
     kyc.pan_document = panDocName;
     kyc.aadhaar_document = aadhaarDocName;
@@ -317,6 +331,7 @@ export class KycService {
     }
 
     await kyc.save();
+    await BankAccountService.syncFromKyc(kyc, { verified: isDirectVerify });
 
     if (isDirectVerify) {
       await KycReview.create({
@@ -348,6 +363,8 @@ export class KycService {
       bankAccountLast4: kyc.bank_account_last4,
       accountHolderName: kyc.account_holder_name,
       ifscCode: kyc.ifsc_code,
+      bankBranch: kyc.bank_branch,
+      bankName: kyc.bank_name,
     };
   }
 
@@ -406,7 +423,7 @@ export class KycService {
                 {
                   model: CustomerProfile,
                   as: 'profile',
-                  attributes: ['full_name', 'referral_code', 'city', 'state'],
+                  attributes: ['full_name', 'referral_code', 'customer_id', 'city', 'state'],
                 },
               ],
             },
@@ -432,11 +449,14 @@ export class KycService {
         email: u?.email || 'N/A',
         phone: u?.phone || 'N/A',
         referralCode: p?.referral_code || 'N/A',
+        customerId: p?.customer_id || null,
         panMasked: item.pan_last4 ? maskPan(item.pan_last4) : 'N/A',
         aadhaarMasked: item.aadhaar_last4 ? maskAadhaar(item.aadhaar_last4) : 'N/A',
         bankAccountMasked: item.bank_account_last4 ? maskBankAccount(`XXXXXXXX${item.bank_account_last4}`) : 'N/A',
         accountHolderName: item.account_holder_name,
         ifscCode: item.ifsc_code,
+        bankBranch: item.bank_branch,
+        bankName: item.bank_name,
         submittedAt: item.submitted_at,
         reviewedAt: item.reviewed_at,
         reviewedBy: r ? { id: r.id, email: r.email, role: r.role } : null,
@@ -528,6 +548,7 @@ export class KycService {
         email: u?.email || 'N/A',
         phone: u?.phone || 'N/A',
         referralCode: p?.referral_code || 'N/A',
+        customerId: p?.customer_id || null,
         referredBy: p?.referred_by || 'N/A',
         dateOfBirth: p?.date_of_birth,
         address: p?.address,
@@ -547,6 +568,8 @@ export class KycService {
         last4: kyc.bank_account_last4,
         accountHolderName: kyc.account_holder_name,
         ifscCode: kyc.ifsc_code,
+        bankBranch: kyc.bank_branch,
+        bankName: kyc.bank_name,
       },
       identityDetails: {
         maskedPan: kyc.pan_last4 ? maskPan(kyc.pan_last4) : 'N/A',
@@ -623,6 +646,9 @@ export class KycService {
     kyc.rejection_reason = null;
     await kyc.save();
 
+    // The verified KYC bank account is the one withdrawals are paid to
+    await BankAccountService.syncFromKyc(kyc, { verified: true });
+
     // Create KYC Review row
     await KycReview.create({
       kyc_id: kyc.id,
@@ -652,7 +678,7 @@ export class KycService {
       userId: kyc.user_id,
       type: NotificationType.KYC_VERIFIED,
       title: 'KYC verified',
-      message: 'Your KYC has been verified. You can now invest in plans and withdraw money to your registered bank account or UPI ID.',
+      message: 'Your KYC has been verified. You can now invest in plans and withdraw money to your verified bank account.',
       relatedEntity: 'KYC_PROFILE',
       relatedId: kyc.id,
     });

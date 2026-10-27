@@ -150,6 +150,9 @@ export const CustomerDetailPage: React.FC = () => {
             </DetailRow>
             <DetailRow label="Date of Birth">{formatDateOnly(p?.dateOfBirth)}</DetailRow>
             <DetailRow label="Address">{address || 'No address provided'}</DetailRow>
+            <DetailRow label="Customer ID" mono>
+              {p?.customerId || '—'}
+            </DetailRow>
             <div>
               <span className="text-slate-500 block text-[11px] uppercase">Referral Code</span>
               <span className="font-mono bg-slate-100 dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800 text-brand-600 dark:text-brand-300 font-bold inline-block">

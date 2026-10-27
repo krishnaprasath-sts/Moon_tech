@@ -25,6 +25,16 @@ export const kycSubmitSchema = z.object({
     .min(11, 'IFSC code must be 11 characters')
     .max(11, 'IFSC code must be 11 characters')
     .regex(/^[A-Za-z]{4}0[A-Za-z0-9]{6}$/, 'Invalid IFSC format (e.g. HDFC0001234)'),
+  bankBranch: z
+    .string()
+    .trim()
+    .min(2, 'Bank branch must be at least 2 characters')
+    .max(100, 'Bank branch is too long'),
+  bankName: z
+    .string({ required_error: 'Bank name is required' })
+    .trim()
+    .min(2, 'Bank name must be at least 2 characters')
+    .max(100, 'Bank name is too long'),
 });
 
 export const manualKycSubmitSchema = z.object({
@@ -52,6 +62,16 @@ export const manualKycSubmitSchema = z.object({
     .min(11, 'IFSC code must be 11 characters')
     .max(11, 'IFSC code must be 11 characters')
     .regex(/^[A-Za-z]{4}0[A-Za-z0-9]{6}$/, 'Invalid IFSC format (e.g. HDFC0001234)'),
+  bankBranch: z
+    .string()
+    .trim()
+    .min(2, 'Bank branch must be at least 2 characters')
+    .max(100, 'Bank branch is too long'),
+  bankName: z
+    .string({ required_error: 'Bank name is required' })
+    .trim()
+    .min(2, 'Bank name must be at least 2 characters')
+    .max(100, 'Bank name is too long'),
   status: z.enum([KycStatus.PENDING, KycStatus.VERIFIED]).default(KycStatus.PENDING).optional(),
   remarks: z.string().max(500).optional().nullable(),
 });

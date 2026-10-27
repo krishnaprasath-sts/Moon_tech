@@ -24,6 +24,7 @@ import {
   weeklyProfitFor,
   monthlyProfitFor,
   isDailyPlan,
+  isMonthlyPlan,
   isOpenEndedPlan,
   lockInDescription,
   payoutDescription,
@@ -164,7 +165,7 @@ function PlansContent() {
         Profit never earns profit by itself; only invested capital earns. Your capital can be withdrawn at any time:
         closing a plan before it ends carries an early withdrawal fee
         {wallet.data ? ` of ${wallet.data.config.capitalWithdrawalFeePercent}%` : ''}; after maturity it is returned in
-        full. Re-investing is free. Amounts shown before confirmation are estimates and are recalculated by MoonTech
+        full. Re-investing is free. Amounts shown before confirmation are estimates and are recalculated by Clyvus Ventures
         when you confirm.
       </p>
 
@@ -201,6 +202,7 @@ function PlanCard({
   const exampleWeekly = weeklyProfitFor(plan, example);
   const exampleMonthly = monthlyProfitFor(plan, example);
   const daily = isDailyPlan(plan);
+  const monthly = isMonthlyPlan(plan);
   const openEnded = isOpenEndedPlan(plan);
   const available = plan.isActive;
 
@@ -257,7 +259,15 @@ function PlanCard({
 
         <p className="mt-3.5 p-3 rounded-xl bg-emerald-500/[0.06] border border-emerald-500/15 text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed">
           <span className="text-zinc-500">Example: </span>
-          {daily ? (
+          {monthly ? (
+            <>
+              <span className="tabular-nums font-semibold text-zinc-900 dark:text-white">{formatINRShort(example)}</span> earns{' '}
+              <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{formatINRShort(exampleMonthly)}</span> every
+              month ({plan.profitValue}% per month), credited on your start date at {PAYOUT_TIME_LABEL}. Total{' '}
+              <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{formatINRShort(exampleProfit)}</span> profit
+              over {formatDuration(plan.durationDays)}; your capital returns in full at maturity.
+            </>
+          ) : daily ? (
             <>
               <span className="tabular-nums font-semibold text-zinc-900 dark:text-white">{formatINRShort(example)}</span> earns{' '}
               <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{formatINRShort(exampleMonthly)}</span> a
@@ -405,6 +415,13 @@ function InvestModal({
           </p>
           <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-white/[0.06] text-xs text-left">
             <DetailRow label="Investment ID" value={<span className="font-mono">{investment.reference}</span>} />
+            {investment.payoutMode === 'MONTHLY' && (
+              <DetailRow
+                label="Monthly profit"
+                value={<span className="tabular-nums font-semibold">+{formatINR(investment.monthlyProfit)} credited monthly on your start date</span>}
+                tone="profit"
+              />
+            )}
             {investment.payoutMode === 'DAILY' && (
               <>
                 <DetailRow
@@ -418,14 +435,14 @@ function InvestModal({
             )}
             {!(investment.payoutMode === 'DAILY' && investment.isOpenEnded) && (
               <DetailRow
-                label={investment.payoutMode === 'DAILY' ? 'Total expected profit' : 'Expected profit'}
+                label={investment.payoutMode === 'DAILY' || investment.payoutMode === 'MONTHLY' ? 'Total expected profit' : 'Expected profit'}
                 value={<span className="tabular-nums font-semibold">+{formatINR(investment.expectedProfit)}</span>}
                 tone="profit"
               />
             )}
             <DetailRow
-              label={investment.payoutMode === 'DAILY' ? 'Capital invested' : 'Maturity amount'}
-              value={<span className="tabular-nums font-bold">{formatINR(investment.payoutMode === 'DAILY' ? investment.amount : investment.maturityAmount)}</span>}
+              label={investment.payoutMode === 'DAILY' || investment.payoutMode === 'MONTHLY' ? 'Capital invested' : 'Maturity amount'}
+              value={<span className="tabular-nums font-bold">{formatINR(investment.payoutMode === 'DAILY' || investment.payoutMode === 'MONTHLY' ? investment.amount : investment.maturityAmount)}</span>}
               strong
             />
             <DetailRow
@@ -435,7 +452,9 @@ function InvestModal({
             <DetailRow label="Status" value={<StatusBadge status={investment.status} kind="investment" />} />
           </div>
           <p className="text-[11px] text-zinc-500 leading-relaxed text-left">
-            {investment.payoutMode === 'DAILY'
+            {investment.payoutMode === 'MONTHLY'
+              ? `What happens next: ${formatINR(investment.monthlyProfit)} is credited to your profit wallet on your start date each month at ${PAYOUT_TIME_LABEL}. Withdraw profit any time from the Wallet page. Your capital returns to your capital wallet at maturity with no fee; closing the plan earlier carries a ${investment.feePercent}% fee.`
+              : investment.payoutMode === 'DAILY'
               ? `What happens next: ${formatINR(investment.dailyProfit)} is credited to your profit wallet every working day (Monday to Friday) at ${PAYOUT_TIME_LABEL}, about ${formatINR(
                   investment.monthlyProfit
                 )} a month. Withdraw profit any time from the Wallet page. ${
@@ -522,6 +541,9 @@ function InvestModal({
             }`}
           />
           <DetailRow label="Term" value={formatDuration(preview.durationDays)} />
+          {preview.payoutMode === 'MONTHLY' && (
+            <DetailRow label="Monthly profit" value={<span className="tabular-nums font-semibold">+{formatINR(preview.monthlyProfit)} (on start date)</span>} tone="profit" />
+          )}
           {preview.payoutMode === 'DAILY' && (
             <>
               <DetailRow label="Daily profit" value={<span className="tabular-nums font-semibold">+{formatINR(preview.dailyProfit)}</span>} tone="profit" />
@@ -534,12 +556,12 @@ function InvestModal({
           )}
           {!(preview.payoutMode === 'DAILY' && preview.isOpenEnded) && (
             <DetailRow
-              label={preview.payoutMode === 'DAILY' ? 'Total expected profit' : 'Expected profit'}
+              label={preview.payoutMode === 'DAILY' || preview.payoutMode === 'MONTHLY' ? 'Total expected profit' : 'Expected profit'}
               value={<span className="tabular-nums font-semibold">+{formatINR(preview.expectedProfit)}</span>}
               tone="profit"
             />
           )}
-          {preview.payoutMode !== 'DAILY' && (
+          {preview.payoutMode === 'AT_MATURITY' && (
             <DetailRow label="Maturity amount" value={<span className="tabular-nums font-bold">{formatINR(preview.maturityAmount)}</span>} strong />
           )}
           <DetailRow
@@ -713,6 +735,13 @@ function InvestModal({
               <Alert>{current.error}</Alert>
             ) : (
               <div className={previewLoading ? 'opacity-60' : ''} aria-busy={previewLoading}>
+                {isMonthlyPlan(plan) && (
+                  <DetailRow
+                    label="Monthly profit"
+                    value={<span className="tabular-nums font-semibold">+{formatINR(preview ? preview.monthlyProfit : estimatedMonthly)} (on start date)</span>}
+                    tone="profit"
+                  />
+                )}
                 {isDailyPlan(plan) && (
                   <>
                     <DetailRow
@@ -744,7 +773,7 @@ function InvestModal({
                     tone="profit"
                   />
                 )}
-                {!isDailyPlan(plan) && (
+                {!isDailyPlan(plan) && !isMonthlyPlan(plan) && (
                   <DetailRow
                     label="Maturity amount"
                     value={<span className="tabular-nums font-bold">{formatINR(preview ? preview.maturityAmount : validAmount + estimatedProfit)}</span>}

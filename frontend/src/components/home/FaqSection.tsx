@@ -5,29 +5,34 @@ import { ChevronDown } from 'lucide-react';
 
 const FAQ = [
   {
-    question: 'Do I need any prior experience?',
+    question: 'I have never bought a share. Can I still join?',
     answer:
-      'No. The Foundations program starts from zero: what a share is, how to open a demat account and how an order is placed. If you already trade, you can start with Technical Analysis or Derivatives.',
+      'Yes. Stock Market Basics starts from zero. We explain everything in simple words. Most of our students start here.',
   },
   {
-    question: 'Is this a tips or advisory service?',
+    question: 'Is this a stock tips or advisory service?',
     answer:
-      'No. MoonTech provides training only. We teach you how to analyse the market and manage risk; we do not give buy or sell recommendations for specific stocks.',
+      'No. We only teach. We do not tell you which shares to buy or sell. You learn to decide for yourself.',
   },
   {
-    question: 'What do I need to attend the sessions?',
+    question: 'When are the classes held?',
     answer:
-      'A laptop or phone with an internet connection. A demat and trading account with any SEBI-registered broker is useful for practice, and we show you how to open one in the first module.',
+      'In the evenings and on weekends, so you can join even if you work. Live market classes are held during market hours. Every class is recorded.',
   },
   {
-    question: 'Are the classes live or recorded?',
+    question: 'What do I need to attend?',
     answer:
-      'Both. Classes are held live online so you can ask questions, and recordings are available afterwards in your account if you miss a session or want to revise.',
+      'A phone or laptop with internet. A demat account helps for practice. If you do not have one, we show you how to open it.',
+  },
+  {
+    question: 'How much money do I need?',
+    answer:
+      'You need no money to learn. When you start practising, use only a small amount you can afford to lose.',
   },
   {
     question: 'How do I join?',
     answer:
-      'Create an account, log in and open your dashboard. From there you can see the available programs, batch timings and everything else you need to get started.',
+      'Sign up, confirm your email and log in. You will see all courses, timings and fees there.',
   },
 ];
 
@@ -40,20 +45,21 @@ export const FaqSection: React.FC = () => {
       className="py-20 border-t border-zinc-200 dark:border-white/[0.06] bg-zinc-100/50 dark:bg-zinc-950/40 transition-colors duration-200 scroll-mt-16"
     >
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-10">
+        <div data-reveal className="text-center mb-10">
           <h2 className="text-2xl sm:text-3xl font-bold text-zinc-950 dark:text-white tracking-tight">
-            Frequently asked questions
+            Common questions
           </h2>
           <p className="text-zinc-600 dark:text-zinc-400 text-xs sm:text-sm mt-2">
-            Quick answers before you get started.
+            Simple answers to common questions.
           </p>
         </div>
 
-        <div className="space-y-2.5">
+        <div data-reveal-group className="space-y-2.5">
           {FAQ.map((item, index) => {
             const expanded = openIndex === index;
             return (
               <div
+                data-reveal
                 key={item.question}
                 className="rounded-2xl bg-white dark:bg-zinc-900/40 border border-zinc-200 dark:border-white/[0.07] shadow-xs"
               >

@@ -37,6 +37,8 @@ const EMPTY_FORM = {
   accountHolderName: '',
   accountNumber: '',
   ifsc: '',
+  bankName: '',
+  bankBranch: '',
   remarks: '',
 };
 
@@ -110,6 +112,9 @@ export const AddManualKycModal: React.FC<AddManualKycModalProps> = ({
     if (form.accountHolderName.trim().length < 2) next.accountHolderName = 'Enter the account holder name';
     if (!ACCOUNT_PATTERN.test(form.accountNumber.trim())) next.accountNumber = 'Account number must be 8-25 digits';
     if (!IFSC_PATTERN.test(form.ifsc.trim())) next.ifsc = 'IFSC must be 11 characters, e.g. HDFC0001234';
+    const bankName = form.bankName.trim();
+    if (bankName.length < 2 || bankName.length > 100) next.bankName = 'Enter the bank name (2-100 characters)';
+    if (form.bankBranch.trim().length < 2) next.bankBranch = 'Enter the bank branch name';
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -127,6 +132,8 @@ export const AddManualKycModal: React.FC<AddManualKycModalProps> = ({
     formData.append('accountNumber', form.accountNumber.trim());
     formData.append('accountHolderName', form.accountHolderName.trim());
     formData.append('ifsc', form.ifsc.trim().toUpperCase());
+    formData.append('bankName', form.bankName.trim());
+    formData.append('bankBranch', form.bankBranch.trim());
     formData.append('status', status);
     if (form.remarks.trim()) formData.append('remarks', form.remarks.trim());
     DOCUMENTS.forEach((doc) => {
@@ -291,6 +298,30 @@ export const AddManualKycModal: React.FC<AddManualKycModalProps> = ({
                 placeholder="HDFC0001234"
                 maxLength={11}
                 className={`${inputClass} uppercase font-mono`}
+              />
+            </Field>
+
+            <Field label="Bank name" htmlFor={`${formId}-bank-name`} required error={errors.bankName}>
+              <input
+                id={`${formId}-bank-name`}
+                type="text"
+                value={form.bankName}
+                onChange={update('bankName')}
+                placeholder="e.g. HDFC Bank"
+                maxLength={100}
+                className={inputClass}
+              />
+            </Field>
+
+            <Field label="Bank branch" htmlFor={`${formId}-bank-branch`} required error={errors.bankBranch}>
+              <input
+                id={`${formId}-bank-branch`}
+                type="text"
+                value={form.bankBranch}
+                onChange={update('bankBranch')}
+                placeholder="e.g. Anna Nagar, Chennai"
+                maxLength={100}
+                className={inputClass}
               />
             </Field>
 

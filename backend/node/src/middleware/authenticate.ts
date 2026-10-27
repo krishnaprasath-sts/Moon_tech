@@ -43,6 +43,9 @@ export async function authenticate(
       throw new UnauthorizedError('User associated with token no longer exists');
     }
 
+    if (user.status === UserStatus.PENDING_VERIFICATION) {
+      throw new UnauthorizedError('Please verify your email address to activate your account.');
+    }
     if (user.status === UserStatus.SUSPENDED) {
       throw new ForbiddenError('Your account has been suspended. Please contact support.');
     }

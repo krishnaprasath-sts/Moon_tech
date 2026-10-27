@@ -172,6 +172,7 @@ export const KycQueuePage: React.FC = () => {
                       <td className="py-3.5 px-4 min-w-[160px]">
                         <div className="font-bold text-slate-900 dark:text-white">{kyc.customerName}</div>
                         <div className="text-[11px] text-slate-500 dark:text-slate-400 break-all">{kyc.email}</div>
+                        {kyc.customerId && <div className="text-[10px] font-mono text-slate-400">{kyc.customerId}</div>}
                       </td>
                       <td className="py-3.5 px-4 font-mono font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">
                         {kyc.panMasked || '—'}
@@ -179,6 +180,11 @@ export const KycQueuePage: React.FC = () => {
                       <td className="py-3.5 px-4 font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">
                         {kyc.bankAccountMasked || '—'}
                         {kyc.ifscCode && <div className="text-[10px] text-slate-400 dark:text-slate-500">{kyc.ifscCode}</div>}
+                        {kyc.bankName && (
+                          <div className="text-[10px] font-sans text-slate-500 dark:text-slate-400 max-w-[180px] truncate" title={kyc.bankName}>
+                            {kyc.bankName}
+                          </div>
+                        )}
                       </td>
                       <td className="py-3.5 px-4">
                         <KycStatusBadge status={kyc.status} />

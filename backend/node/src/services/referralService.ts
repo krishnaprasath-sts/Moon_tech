@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { User, CustomerProfile, KycProfile, Referral, ReferralCommission, Investment } from '../models/index.js';
+import { User, CustomerProfile, KycProfile, Referral, ReferralCommission, ReferralDailyCredit, Investment } from '../models/index.js';
 import { PaginationParams, ReferralCommissionStatus } from '../types/index.js';
 import { NotFoundError } from '../utils/errors.js';
 import { toPaise, fromPaise } from '../utils/money.js';
@@ -41,7 +41,7 @@ export class ReferralService {
       throw new NotFoundError('Customer profile not found');
     }
 
-    const [referrals, commissions, settings] = await Promise.all([
+    const [referrals, commissions, dailyCommissions, settings] = await Promise.all([
       Referral.findAll({
         where: { referrer_user_id: userId },
         include: [
@@ -74,6 +74,10 @@ export class ReferralService {
         ],
         limit: 100,
       }),
+      ReferralDailyCredit.findAll({
+        where: { referrer_user_id: userId },
+        attributes: ['amount', 'referred_user_id'],
+      }),
       SettingsService.getSettings(),
     ]);
 
@@ -81,6 +85,9 @@ export class ReferralService {
     for (const c of commissions) {
       if (c.status !== ReferralCommissionStatus.CREDITED) continue;
       earnedByUser.set(c.referred_user_id, (earnedByUser.get(c.referred_user_id) ?? 0) + toPaise(c.amount));
+    }
+    for (const d of dailyCommissions) {
+      earnedByUser.set(d.referred_user_id, (earnedByUser.get(d.referred_user_id) ?? 0) + toPaise(d.amount));
     }
 
     const referredUsers = referrals.map((r: any) => {
@@ -105,15 +112,17 @@ export class ReferralService {
 
     const credited = commissions.filter((c) => c.status === ReferralCommissionStatus.CREDITED);
     const pending = commissions.filter((c) => c.status === ReferralCommissionStatus.PENDING);
+    const totalDailyPaise = sumPaise(dailyCommissions.map((d) => d.amount));
 
     return {
       referralCode: profile.referral_code,
       referredBy: profile.referred_by,
       commissionPercent: settings.referralCommissionPercent,
+      dailyCommissionPercent: settings.dailyReferralCommissionPercent,
       totalReferrals: referredUsers.length,
       verifiedReferrals: referredUsers.filter((u) => u.kycStatus === 'VERIFIED').length,
       pendingKycReferrals: referredUsers.filter((u) => u.kycStatus === 'PENDING').length,
-      totalCommissionEarned: fromPaise(sumPaise(credited.map((c) => c.amount))),
+      totalCommissionEarned: fromPaise(sumPaise(credited.map((c) => c.amount)) + totalDailyPaise),
       pendingCommission: fromPaise(sumPaise(pending.map((c) => c.amount))),
       pendingCommissionCount: pending.length,
       referrals: referredUsers,

@@ -6,3 +6,5 @@ export * from './useActivityLogs';
 export * from './useStaff';
 export * from './useFinance';
 export * from './useDebouncedValue';
+export * from './useSupport';
+export * from './useBankChanges';

@@ -1,6 +1,6 @@
 import { Op } from 'sequelize';
 import { logger } from '../utils/logger.js';
-import { PasswordReset, LoginOtp } from '../models/index.js';
+import { PasswordReset, LoginOtp, EmailVerification } from '../models/index.js';
 import { InvestmentService } from '../services/investmentService.js';
 import { DailyPayoutService } from '../services/dailyPayoutService.js';
 
@@ -40,6 +40,7 @@ async function runCleanupJob(): Promise<void> {
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
     await PasswordReset.destroy({ where: { expires_at: { [Op.lt]: cutoff } } });
     await LoginOtp.destroy({ where: { expires_at: { [Op.lt]: cutoff } } });
+    await EmailVerification.destroy({ where: { expires_at: { [Op.lt]: cutoff } } });
   } catch (err) {
     logger.error('[CRON] Password reset cleanup job failed', err);
   }

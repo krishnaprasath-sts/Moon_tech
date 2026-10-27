@@ -16,8 +16,14 @@ import { SystemSetting } from './SystemSetting.js';
 import { UserPayoutDetail } from './UserPayoutDetail.js';
 import { PasswordReset } from './PasswordReset.js';
 import { LoginOtp } from './LoginOtp.js';
+import { EmailVerification } from './EmailVerification.js';
 import { ProfitCredit } from './ProfitCredit.js';
 import { ReferralCommission } from './ReferralCommission.js';
+import { ReferralDailyCredit } from './ReferralDailyCredit.js';
+import { SupportMessage } from './SupportMessage.js';
+import { SupportGuest } from './SupportGuest.js';
+import { SupportGuestMessage } from './SupportGuestMessage.js';
+import { BankChangeRequest } from './BankChangeRequest.js';
 import { sequelize } from '../config/database.js';
 
 // User <-> CustomerProfile
@@ -221,6 +227,24 @@ Investment.hasOne(ReferralCommission, {
   as: 'referralCommission',
 });
 
+// Recurring daily referral credits
+ReferralDailyCredit.belongsTo(User, {
+  foreignKey: 'referrer_user_id',
+  as: 'referrer',
+});
+ReferralDailyCredit.belongsTo(User, {
+  foreignKey: 'referred_user_id',
+  as: 'referred',
+});
+ReferralDailyCredit.belongsTo(Investment, {
+  foreignKey: 'investment_id',
+  as: 'investment',
+});
+Investment.hasMany(ReferralDailyCredit, {
+  foreignKey: 'investment_id',
+  as: 'dailyReferralCredits',
+});
+
 // User <-> Notification
 User.hasMany(Notification, {
   foreignKey: 'user_id',
@@ -272,6 +296,54 @@ LoginOtp.belongsTo(User, {
   as: 'user',
 });
 
+// User <-> EmailVerification (registration link)
+User.hasMany(EmailVerification, {
+  foreignKey: 'user_id',
+  as: 'emailVerifications',
+  onDelete: 'CASCADE',
+});
+EmailVerification.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'user',
+});
+
+// Support chat: customer thread + replying admin
+User.hasMany(SupportMessage, {
+  foreignKey: 'user_id',
+  as: 'supportMessages',
+  onDelete: 'CASCADE',
+});
+SupportMessage.belongsTo(User, {
+  foreignKey: 'user_id',
+  as: 'customer',
+});
+SupportMessage.belongsTo(User, {
+  foreignKey: 'admin_user_id',
+  as: 'admin',
+  constraints: false,
+});
+
+// Visitor (not signed in) support chat
+SupportGuest.hasMany(SupportGuestMessage, {
+  foreignKey: 'guest_id',
+  as: 'messages',
+  onDelete: 'CASCADE',
+});
+SupportGuestMessage.belongsTo(SupportGuest, {
+  foreignKey: 'guest_id',
+  as: 'guest',
+});
+SupportGuestMessage.belongsTo(User, {
+  foreignKey: 'admin_user_id',
+  as: 'admin',
+  constraints: false,
+});
+
+// Bank account change requests (customer) and the reviewing admin
+User.hasMany(BankChangeRequest, { foreignKey: 'user_id', as: 'bankChangeRequests', onDelete: 'CASCADE' });
+BankChangeRequest.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+BankChangeRequest.belongsTo(User, { foreignKey: 'reviewed_by', as: 'reviewer', constraints: false });
+
 export {
   sequelize,
   User,
@@ -293,7 +365,13 @@ export {
   UserPayoutDetail,
   PasswordReset,
   LoginOtp,
+  EmailVerification,
   ProfitCredit,
   ReferralCommission,
+  ReferralDailyCredit,
+  SupportMessage,
+  SupportGuest,
+  SupportGuestMessage,
+  BankChangeRequest,
 };
 

@@ -45,6 +45,9 @@ export const uploadReceipt = singleFileUpload('receipt');
 // Payout proof uploaded by the admin when completing a withdrawal
 export const uploadPaymentProof = singleFileUpload('paymentProof');
 
+// Bank proof (passbook / cancelled cheque / statement) with a bank account change request
+export const uploadBankProof = singleFileUpload('proof');
+
 const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
 
 // Custom UPI QR image uploaded by the admin in Settings (images only, 2 MB)

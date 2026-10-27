@@ -5,7 +5,6 @@ import { useCallback } from 'react';
 import Link from 'next/link';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
-import { FloatingSupport } from '@/components/layout/FloatingSupport';
 import { RequireAuth } from '@/components/layout/RequireAuth';
 import { ArrowRight, Star } from 'lucide-react';
 import { api, InvestmentPlan } from '@/lib/api';
@@ -46,6 +45,11 @@ interface FeaturedCard {
 }
 
 function describePlan(plan: InvestmentPlan): string {
+  if (plan.payoutMode === 'MONTHLY') {
+    return `${plan.profitValue}% of your capital credited to your profit wallet every month on your start date at 6:00 AM for ${formatDuration(
+      plan.durationDays
+    )}. Your capital is returned at maturity, or earlier if you close the plan.`;
+  }
   if (plan.payoutMode === 'DAILY') {
     const rate = formatProfit(plan.profitType, plan.profitValue, plan.payoutMode, plan.rateBasis);
     return isOpenEndedPlan(plan)
@@ -112,7 +116,7 @@ function PlanOfferCard({ card }: { card: FeaturedCard }) {
       <div>
         <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-white/[0.06] mb-5">
           <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-            {plan.payoutMode === 'DAILY' ? 'Profit rate' : 'Expected profit'}
+            {plan.payoutMode === 'DAILY' || plan.payoutMode === 'MONTHLY' ? 'Profit rate' : 'Expected profit'}
           </div>
           <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
             {formatProfit(plan.profitType, plan.profitValue, plan.payoutMode, plan.rateBasis)}
@@ -120,6 +124,8 @@ function PlanOfferCard({ card }: { card: FeaturedCard }) {
           <div className="text-[10px] text-zinc-500 mt-1">
             {plan.payoutMode === 'DAILY'
               ? `e.g. ${formatINRShort(example)} earns ${formatINRShort(monthlyProfitFor(plan, example))} a month, paid every working day`
+              : plan.payoutMode === 'MONTHLY'
+              ? `e.g. ${formatINRShort(example)} earns ${formatINRShort(monthlyProfitFor(plan, example))} a month, paid on your start date`
               : `e.g. ${formatINRShort(example)} becomes ${formatINRShort(example + estimateProfit(plan, example))} in ${formatDuration(
                   plan.durationDays
                 )}`}{' '}
@@ -252,13 +258,11 @@ function OffersContent() {
 
             <p className="mt-8 text-[11px] text-zinc-500 leading-relaxed max-w-2xl">
               Investments carry risk. Profit figures are the expected amounts as per each plan&apos;s terms and are
-              confirmed by MoonTech when you invest.
+              confirmed by Clyvus Ventures when you invest.
             </p>
           </>
         )}
       </main>
-
-      <FloatingSupport />
       <Footer />
     </div>
   );

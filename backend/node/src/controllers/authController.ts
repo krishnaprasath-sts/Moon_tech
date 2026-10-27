@@ -22,6 +22,36 @@ export class AuthController {
     }
   }
 
+  public static async verifyEmail(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await AuthService.verifyEmail(req.body, req.ip || req.socket.remoteAddress, req.headers['user-agent']);
+      sendResponse({
+        res,
+        message: result.alreadyActive
+          ? 'Your email was already verified. You can sign in.'
+          : result.firstLoginToken
+            ? 'Your email is verified. Sign in now with your password. You will not need a code this first time.'
+            : 'Your email is verified. You can sign in now.',
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public static async resendVerification(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await AuthService.resendVerification(req.body);
+      sendResponse({
+        res,
+        message: `If an unverified account exists for ${result.email}, a new verification link has been sent. It is valid for ${result.expiresInHours} hours.`,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   public static async login(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const ipAddress = req.ip || req.socket.remoteAddress;

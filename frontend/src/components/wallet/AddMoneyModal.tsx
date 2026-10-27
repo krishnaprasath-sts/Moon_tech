@@ -300,6 +300,7 @@ export function AddMoneyModal({
             <CopyRow label="Account number" value={config.bankAccountNumber} mono />
             <CopyRow label="IFSC code" value={config.bankIfsc} mono />
             <CopyRow label="Bank" value={config.bankName} copy={false} />
+            {config.bankBranch && <CopyRow label="Branch" value={config.bankBranch} copy={false} />}
             <CopyRow label="Amount" value={amount.toFixed(2)} display={formatINR(amount)} />
           </div>
           <div className="rounded-xl bg-blue-500/[0.06] border border-blue-500/15 p-3 text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed space-y-1">

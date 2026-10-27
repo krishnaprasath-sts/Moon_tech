@@ -6,9 +6,9 @@ import { Logo } from '../brand/Logo';
 import { useAuth } from '@/lib/useAuth';
 
 const TRAINING_LINKS = [
-  { label: 'Programs', href: '/#programs' },
+  { label: 'Courses', href: '/#programs' },
   { label: 'How it works', href: '/#how-it-works' },
-  { label: 'Why MoonTech', href: '/#why-us' },
+  { label: 'Why Clyvus Ventures', href: '/#why-us' },
   { label: 'FAQ', href: '/#faq' },
 ];
 
@@ -39,11 +39,10 @@ export const Footer: React.FC = () => {
           <div className="lg:col-span-2 space-y-3">
             <Logo size="md" />
             <p className="text-zinc-600 dark:text-zinc-400 text-xs leading-relaxed max-w-sm pt-1">
-              MoonTech Solutions provides stock market and trading training: foundations, technical analysis,
-              derivatives and live mentorship for beginners and working professionals.
+              Clyvus Ventures teaches the stock market in simple steps, with live classes and a personal mentor.
             </p>
             <div className="text-[11px] text-zinc-500 pt-2 font-mono">
-              © {new Date().getFullYear()} MoonTech Solutions. All rights reserved.
+              © {new Date().getFullYear()} Clyvus Ventures. All rights reserved.
             </div>
           </div>
 
@@ -94,9 +93,8 @@ export const Footer: React.FC = () => {
 
         <div className="mt-12 pt-6 border-t border-zinc-200 dark:border-white/[0.04] text-[11px] text-zinc-500 leading-relaxed">
           <p>
-            Disclaimer: training content is for education only and is not financial advice or a recommendation to buy or
-            sell any security. Trading in the stock market carries risk, including the possible loss of capital. Consider
-            your financial situation before you trade.
+            Disclaimer: our classes are for learning only. We do not tell you which shares to buy or sell. Trading in the
+            stock market has risk and you can lose money. Trade only with money you can afford to lose.
           </p>
         </div>
       </div>

@@ -156,6 +156,8 @@ export function KycModal({
   const [accountNumber, setAccountNumber] = useState('');
   const [editedHolderName, setEditedHolderName] = useState<string | null>(null);
   const [ifsc, setIfsc] = useState('');
+  const [bankName, setBankName] = useState('');
+  const [bankBranch, setBankBranch] = useState('');
   const [files, setFiles] = useState<Record<DocumentKey, File | null>>({ pan: null, aadhaar: null, aadhaarBack: null, passbook: null });
 
   const panelRef = useRef<HTMLDivElement>(null);
@@ -258,6 +260,18 @@ export function KycModal({
       return;
     }
 
+    const cleanBankName = bankName.trim().replace(/\s+/g, ' ');
+    if (cleanBankName.length < 2) {
+      setError('Enter your bank name as printed on the passbook (e.g. State Bank of India).');
+      return;
+    }
+
+    const cleanBranch = bankBranch.trim();
+    if (cleanBranch.length < 2) {
+      setError('Enter your bank branch name as printed on the passbook (e.g. Anna Nagar, Chennai).');
+      return;
+    }
+
     if (!files.pan || !files.aadhaar || !files.aadhaarBack || !files.passbook) {
       setError('Please upload all 4 documents: PAN card, Aadhaar front, Aadhaar back and bank passbook / statement.');
       return;
@@ -271,6 +285,8 @@ export function KycModal({
       formData.append('accountNumber', cleanAcc);
       formData.append('accountHolderName', cleanHolder);
       formData.append('ifsc', cleanIfsc);
+      formData.append('bankName', cleanBankName);
+      formData.append('bankBranch', cleanBranch);
 
       formData.append('panDocument', files.pan);
       formData.append('aadhaarDocument', files.aadhaar);
@@ -616,6 +632,48 @@ export function KycModal({
                     />
                     <p id="kyc-ifsc-help" className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1.5">
                       11 characters (e.g. HDFC0001234). The 5th character is always zero.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label htmlFor="kyc-bank-name" className="block text-xs font-semibold text-zinc-800 dark:text-zinc-200 mb-1.5">
+                      Bank name <span className="text-blue-600" aria-hidden="true">*</span>
+                    </label>
+                    <input
+                      id="kyc-bank-name"
+                      type="text"
+                      required
+                      maxLength={100}
+                      autoComplete="off"
+                      placeholder="e.g. State Bank of India"
+                      value={bankName}
+                      onChange={(e) => setBankName(e.target.value)}
+                      aria-describedby="kyc-bank-name-help"
+                      className={kycInputClass}
+                    />
+                    <p id="kyc-bank-name-help" className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1.5">
+                      The full bank name, as printed on your passbook or cheque.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label htmlFor="kyc-branch" className="block text-xs font-semibold text-zinc-800 dark:text-zinc-200 mb-1.5">
+                      Bank branch <span className="text-blue-600" aria-hidden="true">*</span>
+                    </label>
+                    <input
+                      id="kyc-branch"
+                      type="text"
+                      required
+                      maxLength={100}
+                      autoComplete="off"
+                      placeholder="e.g. Anna Nagar, Chennai"
+                      value={bankBranch}
+                      onChange={(e) => setBankBranch(e.target.value)}
+                      aria-describedby="kyc-branch-help"
+                      className={kycInputClass}
+                    />
+                    <p id="kyc-branch-help" className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1.5">
+                      The branch name printed on your passbook or statement.
                     </p>
                   </div>
                 </div>

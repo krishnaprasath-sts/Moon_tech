@@ -139,3 +139,52 @@ export function nextPayoutInstant(fromKey: string): Date {
   while (!isWorkingDay(cursor)) cursor = addDaysToKey(cursor, 1);
   return istTimeOnDay(cursor, PAYOUT_HOUR_IST);
 }
+
+/**
+ * Number of monthly credits a MONTHLY-payout plan pays over its term: whole 30-day months,
+ * like the daily plans (365 days = 12 credits), and at least one. Open-ended terms (0 days)
+ * are not allowed for monthly plans; treat them as a year.
+ */
+export function monthlyCreditsForTerm(durationDays: number): number {
+  const days = Math.floor(Number(durationDays) || 0);
+  if (days <= 0) return 12;
+  return Math.max(1, Math.floor(days / CYCLE_DAYS));
+}
+
+/**
+ * Monthly anniversary due dates for an investment, from start date up to and including `toKey`.
+ * E.g., started on 2026-10-24 with 365 days term -> month 1 is 2026-11-24, month 2 is 2026-12-24, etc.
+ * Clamps to the last day of the month for dates like Jan 31 -> Feb 28. A due date that would
+ * fall after the term ends (a 365-day term across Feb 29 ends one day before the 12th
+ * anniversary) is paid on the last day of the term instead, so every month is always credited.
+ */
+export function monthlyDueDates(
+  startKey: string,
+  durationDays: number,
+  toKey: string
+): { monthNo: number; dayKey: string }[] {
+  const parts = startKey.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return [];
+  const [startYear, startMonth, startDay] = parts;
+
+  const totalMonths = monthlyCreditsForTerm(durationDays);
+  const endKey = durationDays > 0 ? addDaysToKey(startKey, Math.floor(durationDays)) : null;
+  const result: { monthNo: number; dayKey: string }[] = [];
+
+  for (let m = 1; m <= totalMonths; m++) {
+    const targetMonth = startMonth + m;
+    const year = startYear + Math.floor((targetMonth - 1) / 12);
+    const month = ((targetMonth - 1) % 12) + 1;
+    const maxDays = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const day = Math.min(startDay, maxDays);
+    let dayKey = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    if (endKey && dayKey > endKey) dayKey = endKey;
+
+    if (dayKey <= toKey && !result.some((r) => r.dayKey === dayKey)) {
+      result.push({ monthNo: m, dayKey });
+    }
+  }
+
+  return result;
+}
+

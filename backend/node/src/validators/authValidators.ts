@@ -160,6 +160,16 @@ export const createCustomerSchema = z.object({
 export const loginSchema = z.object({
   email: z.string().min(1, 'Email or phone is required'),
   password: z.string().min(1, 'Password is required'),
+  // Pass from the email verification link: the first sign-in in that browser skips the login code
+  firstLoginToken: z.string().trim().max(1000).optional(),
+});
+
+export const verifyEmailSchema = z.object({
+  token: z.string().trim().min(20, 'Invalid verification link').max(128, 'Invalid verification link'),
+});
+
+export const resendVerificationSchema = z.object({
+  email: emailField,
 });
 
 export const updateCustomerStatusSchema = z.object({
@@ -174,4 +184,6 @@ export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type LoginOtpVerifyInput = z.infer<typeof loginOtpVerifySchema>;
 export type LoginOtpResendInput = z.infer<typeof loginOtpResendSchema>;
+export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
+export type ResendVerificationInput = z.infer<typeof resendVerificationSchema>;
 export type UpdateCustomerStatusInput = z.infer<typeof updateCustomerStatusSchema>;

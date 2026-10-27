@@ -12,6 +12,12 @@ export class AppError extends Error {
   }
 }
 
+export class ServiceUnavailableError extends AppError {
+  constructor(message = 'The service is temporarily unavailable') {
+    super(message, 503);
+  }
+}
+
 export class NotFoundError extends AppError {
   constructor(message = 'Resource not found') {
     super(message, 404);

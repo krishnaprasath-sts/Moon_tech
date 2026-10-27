@@ -20,9 +20,11 @@ type FieldErrors = Partial<
     | 'bankAccountNumber'
     | 'bankIfsc'
     | 'bankName'
+    | 'bankBranch'
     | 'bankTransferInstructions'
     | 'walletMinWithdrawal'
     | 'referralCommissionPercent'
+    | 'dailyReferralCommissionPercent'
     | 'capitalWithdrawalFeePercent',
     string
   >
@@ -43,11 +45,13 @@ export const WalletSettingsCard: React.FC = () => {
   const [bankAccountNumber, setBankAccountNumber] = useState('');
   const [bankIfsc, setBankIfsc] = useState('');
   const [bankName, setBankName] = useState('');
+  const [bankBranch, setBankBranch] = useState('');
   const [bankTransferInstructions, setBankTransferInstructions] = useState('');
   const [requireKyc, setRequireKyc] = useState(false);
   const [requireKycWithdrawal, setRequireKycWithdrawal] = useState(false);
   const [walletMinWithdrawal, setWalletMinWithdrawal] = useState('');
   const [referralCommissionPercent, setReferralCommissionPercent] = useState('');
+  const [dailyReferralCommissionPercent, setDailyReferralCommissionPercent] = useState('');
   const [capitalWithdrawalFeePercent, setCapitalWithdrawalFeePercent] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -61,11 +65,13 @@ export const WalletSettingsCard: React.FC = () => {
     setBankAccountNumber(settings.bankAccountNumber || '');
     setBankIfsc(settings.bankIfsc || '');
     setBankName(settings.bankName || '');
+    setBankBranch(settings.bankBranch || '');
     setBankTransferInstructions(settings.bankTransferInstructions || '');
     setRequireKyc(Boolean(settings.requireKycForInvestment));
     setRequireKycWithdrawal(Boolean(settings.requireKycForWithdrawal));
     setWalletMinWithdrawal(String(settings.walletMinWithdrawal ?? ''));
     setReferralCommissionPercent(String(settings.referralCommissionPercent ?? ''));
+    setDailyReferralCommissionPercent(String(settings.dailyReferralCommissionPercent ?? '0.025'));
     setCapitalWithdrawalFeePercent(String(settings.capitalWithdrawalFeePercent ?? ''));
     setErrors({});
     setFormError(null);
@@ -87,6 +93,7 @@ export const WalletSettingsCard: React.FC = () => {
     if (bankAccountNumber.trim() !== (settings.bankAccountNumber || '')) changes.bankAccountNumber = bankAccountNumber.trim();
     if (bankIfsc.trim().toUpperCase() !== (settings.bankIfsc || '')) changes.bankIfsc = bankIfsc.trim().toUpperCase();
     if (bankName.trim() !== (settings.bankName || '')) changes.bankName = bankName.trim();
+    if (bankBranch.trim() !== (settings.bankBranch || '')) changes.bankBranch = bankBranch.trim();
     if (bankTransferInstructions.trim() !== (settings.bankTransferInstructions || '')) {
       changes.bankTransferInstructions = bankTransferInstructions.trim();
     }
@@ -99,6 +106,9 @@ export const WalletSettingsCard: React.FC = () => {
     }
     if (Number(referralCommissionPercent) !== Number(settings.referralCommissionPercent)) {
       changes.referralCommissionPercent = Number(referralCommissionPercent);
+    }
+    if (Number(dailyReferralCommissionPercent) !== Number(settings.dailyReferralCommissionPercent)) {
+      changes.dailyReferralCommissionPercent = Number(dailyReferralCommissionPercent);
     }
     if (Number(capitalWithdrawalFeePercent) !== Number(settings.capitalWithdrawalFeePercent)) {
       changes.capitalWithdrawalFeePercent = Number(capitalWithdrawalFeePercent);
@@ -133,6 +143,14 @@ export const WalletSettingsCard: React.FC = () => {
     if (changes.walletMinWithdrawal !== undefined) next.walletMinWithdrawal = checkMoney(walletMinWithdrawal);
     if (changes.referralCommissionPercent !== undefined) {
       next.referralCommissionPercent = percentError(referralCommissionPercent);
+    }
+    if (changes.dailyReferralCommissionPercent !== undefined) {
+      const pct = Number(dailyReferralCommissionPercent);
+      if (dailyReferralCommissionPercent.trim() === '' || !Number.isFinite(pct) || pct < 0) {
+        next.dailyReferralCommissionPercent = 'Enter 0 or a positive percentage';
+      } else if (pct > 100) {
+        next.dailyReferralCommissionPercent = 'Cannot exceed 100%';
+      }
     }
     if (changes.capitalWithdrawalFeePercent !== undefined) {
       next.capitalWithdrawalFeePercent = percentError(capitalWithdrawalFeePercent);
@@ -301,7 +319,7 @@ export const WalletSettingsCard: React.FC = () => {
                     setBankAccountName(e.target.value);
                     clear('bankAccountName');
                   }}
-                  placeholder="e.g. Moon Tech Solutions Pvt Ltd"
+                  placeholder="e.g. Clyvus Ventures Pvt Ltd"
                   className={inputClass}
                 />
               </Field>
@@ -316,7 +334,22 @@ export const WalletSettingsCard: React.FC = () => {
                     setBankName(e.target.value);
                     clear('bankName');
                   }}
-                  placeholder="e.g. State Bank of India, Anna Nagar branch"
+                  placeholder="e.g. State Bank of India"
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Branch" htmlFor={`${formId}-bank-branch`} error={errors.bankBranch} hint="Optional; shown to customers with the transfer details">
+                <input
+                  id={`${formId}-bank-branch`}
+                  type="text"
+                  value={bankBranch}
+                  disabled={readOnly}
+                  maxLength={100}
+                  onChange={(e) => {
+                    setBankBranch(e.target.value);
+                    clear('bankBranch');
+                  }}
+                  placeholder="e.g. Anna Nagar, Chennai"
                   className={inputClass}
                 />
               </Field>
@@ -398,11 +431,11 @@ export const WalletSettingsCard: React.FC = () => {
               />
             </Field>
             <Field
-              label="Referral commission (%)"
+              label="Instant referral commission (%)"
               htmlFor={`${formId}-commission`}
               required
               error={errors.referralCommissionPercent}
-              hint="Paid once to the referrer at 6:00 AM, 24 hours after a referred customer invests. 0 switches it off."
+              hint="Paid once to the referrer instantly upon investment (or at 6:00 AM). 0 switches it off."
             >
               <input
                 id={`${formId}-commission`}
@@ -416,6 +449,28 @@ export const WalletSettingsCard: React.FC = () => {
                 onChange={(e) => {
                   setReferralCommissionPercent(e.target.value);
                   clear('referralCommissionPercent');
+                }}
+                className={`${inputClass} font-mono font-bold`}
+              />
+            </Field>
+            <Field
+              label="Daily recurring referral commission (%)"
+              htmlFor={`${formId}-daily-commission`}
+              error={errors.dailyReferralCommissionPercent}
+              hint="Paid every working day at 6:00 AM IST on active referred investments (e.g. 0.025% = 0.5% per month). 0 switches it off."
+            >
+              <input
+                id={`${formId}-daily-commission`}
+                type="number"
+                step="0.0001"
+                min="0"
+                max="100"
+                inputMode="decimal"
+                value={dailyReferralCommissionPercent}
+                disabled={readOnly}
+                onChange={(e) => {
+                  setDailyReferralCommissionPercent(e.target.value);
+                  clear('dailyReferralCommissionPercent');
                 }}
                 className={`${inputClass} font-mono font-bold`}
               />

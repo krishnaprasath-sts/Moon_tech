@@ -146,6 +146,10 @@ export function KycStatusCard({ kyc }: { kyc: KycStatusInfo }) {
               <dd className="text-zinc-800 dark:text-zinc-200 text-right truncate">{kyc.details?.accountHolderName || '—'}</dd>
               <dt className="text-zinc-500">IFSC</dt>
               <dd className="font-mono text-zinc-800 dark:text-zinc-200 text-right">{kyc.details?.ifscCode || '—'}</dd>
+              <dt className="text-zinc-500">Bank</dt>
+              <dd className="text-zinc-800 dark:text-zinc-200 text-right truncate">{kyc.details?.bankName || '—'}</dd>
+              <dt className="text-zinc-500">Branch</dt>
+              <dd className="text-zinc-800 dark:text-zinc-200 text-right truncate">{kyc.details?.bankBranch || '—'}</dd>
             </dl>
           </div>
         </div>

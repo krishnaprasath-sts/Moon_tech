@@ -26,6 +26,7 @@ import {
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '../utils/errors.js';
 import { toPaise, fromPaise, formatInr, generateReference } from '../utils/money.js';
 import { decryptData } from '../utils/encryption.js';
+import { BankAccountService, encryptedFingerprint } from './bankAccountService.js';
 import { maskBankAccount } from '../utils/mask.js';
 import { toIso, parseDbDate, parseDateRange } from '../utils/dates.js';
 import { latestPayableDay } from '../utils/workingDays.js';
@@ -79,6 +80,7 @@ function serialize(w: Withdrawal) {
     payoutAccountMasked: w.payout_account_last4 ? maskBankAccount(`XXXXXXXX${w.payout_account_last4}`) : null,
     payoutIfsc: w.payout_ifsc,
     payoutBankName: w.payout_bank_name,
+    payoutBankBranch: w.payout_bank_branch,
     status: w.status,
     rejectionReason: w.rejection_reason,
     paymentReference: w.payment_reference,
@@ -179,6 +181,11 @@ export class WithdrawalService {
       payout_account_last4: method === PayoutMethod.BANK ? payout.account_last4 : null,
       payout_ifsc: method === PayoutMethod.BANK ? payout.ifsc_code : null,
       payout_bank_name: method === PayoutMethod.BANK ? payout.bank_name : null,
+      payout_bank_branch: method === PayoutMethod.BANK ? payout.bank_branch : null,
+      // Fingerprint + origin of the account, so the admin can tell a KYC account from a changed one
+      payout_account_hash:
+        method === PayoutMethod.BANK ? payout.account_hash || encryptedFingerprint(payout.account_number_encrypted) : null,
+      payout_bank_source: method === PayoutMethod.BANK ? payout.bank_source || null : null,
     };
   }
 
@@ -343,12 +350,14 @@ export class WithdrawalService {
         (maturityDate !== null && maturityDate.getTime() <= Date.now());
       // Open-ended plans never "mature"; closing them early is the normal way out
       const isEarly = !hasMatured;
-
       const principalPaise = toPaise(inv.amount);
-      // Daily-profit plans have already credited their profit day by day; maturity-paid plans
-      // only earn their profit by completing the full period.
+
+      // Daily and monthly plans have already credited their profit periodically to the profit wallet;
+      // maturity-paid plans only earn their profit by completing the full period.
       const profitPaise =
-        isEarly || inv.payout_mode === ProfitPayoutMode.DAILY ? 0 : toPaise(inv.expected_profit);
+        isEarly || inv.payout_mode === ProfitPayoutMode.DAILY || inv.payout_mode === ProfitPayoutMode.MONTHLY
+          ? 0
+          : toPaise(inv.expected_profit);
       const grossPaise = principalPaise + profitPaise;
 
       const created = await Withdrawal.create(
@@ -483,8 +492,9 @@ export class WithdrawalService {
       Object.values(WithdrawalStatus).map(async (status) => [status, await Withdrawal.count({ where: { status } })])
     );
 
+    const bankFlags = await BankAccountService.bankFlagsForWithdrawals(rows);
     return {
-      withdrawals: rows.map(serializeForAdmin),
+      withdrawals: rows.map((w) => ({ ...serializeForAdmin(w), bankFlag: bankFlags.get(w.id) ?? null })),
       meta: { ...buildMeta(page, limit, count), counts: Object.fromEntries(statusCounts) },
     };
   }
@@ -506,6 +516,8 @@ export class WithdrawalService {
 
     return {
       ...serializeForAdmin(withdrawal),
+      // KYC account / approved change / unverified, with the reasons
+      bankCheck: await BankAccountService.bankCheckForWithdrawal(withdrawal),
       payoutAccountNumber:
         canProcess && withdrawal.payout_account_number_encrypted
           ? decryptData(withdrawal.payout_account_number_encrypted)
@@ -718,13 +730,17 @@ export class WithdrawalService {
       ? await FileService.savePaymentDocument(existing.user_id, proof, 'PAYOUT_PROOF')
       : null;
 
-    // Daily-profit investments: credit every working day earned up to the withdrawal request
+    // Daily/monthly-profit investments: credit every period earned up to the withdrawal request
     // before the investment is closed, so a payout completed before the 06:00 run never loses a day.
+    // The referrer's daily commission for those days is settled the same way.
     if (existing.source === WithdrawalSource.INVESTMENT && existing.investment_id) {
       const inv = await Investment.findByPk(existing.investment_id);
-      if (inv && inv.payout_mode === ProfitPayoutMode.DAILY) {
+      if (inv) {
         const lastDay = await DailyPayoutService.lastEarningDay(inv, latestPayableDay(new Date()));
-        await DailyPayoutService.creditInvestmentUpTo(inv, lastDay);
+        if (inv.payout_mode === ProfitPayoutMode.DAILY || inv.payout_mode === ProfitPayoutMode.MONTHLY) {
+          await DailyPayoutService.creditInvestmentUpTo(inv, lastDay);
+        }
+        await DailyPayoutService.creditReferralCommissionUpTo(inv, lastDay, { notify: true });
       }
     }
 

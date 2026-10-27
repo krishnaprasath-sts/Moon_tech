@@ -1,6 +1,7 @@
 import React, { useState, useId } from 'react';
 import {
   FileBarChart,
+  FileText,
   Download,
   Loader2,
   AlertCircle,
@@ -16,7 +17,7 @@ import {
   LucideIcon,
 } from 'lucide-react';
 import { useFinanceReport, UseFinanceReportParams } from '../hooks';
-import { financeApi } from '../api';
+import { financeApi, ReportDownloadFormat } from '../api';
 import { useToast } from '../context/ToastContext';
 import { PageHeader } from '../components/PageHeader';
 import { ReportCellType, ReportCellValue, ReportType } from '../types';
@@ -64,7 +65,7 @@ export const ReportsPage: React.FC = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [request, setRequest] = useState<UseFinanceReportParams | null>(null);
-  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloading, setDownloading] = useState<ReportDownloadFormat | null>(null);
 
   const { toast } = useToast();
   const { data: report, isFetching, isError, error, refetch } = useFinanceReport(request);
@@ -85,26 +86,28 @@ export const ReportsPage: React.FC = () => {
     });
   };
 
-  const handleDownloadCsv = async () => {
-    if (isDownloading) return;
+  const handleDownload = async (format: ReportDownloadFormat) => {
+    if (downloading) return;
     if (isDateRangeInvalid) {
       toast.error('Start date cannot be after the end date');
       return;
     }
 
-    setIsDownloading(true);
+    const formatLabel = format.toUpperCase();
+    setDownloading(format);
     try {
-      const blob = await financeApi.downloadReportCsv(reportType, {
-        startDate: startDate || undefined,
-        endDate: endDate || undefined,
-      });
+      const blob = await financeApi.downloadReport(
+        reportType,
+        { startDate: startDate || undefined, endDate: endDate || undefined },
+        format
+      );
       const range = startDate || endDate ? `_${startDate || 'start'}_to_${endDate || 'today'}` : '';
-      downloadBlob(blob, `${reportType}_report${range}.csv`);
-      toast.success(`${selectedType?.label || 'Report'} downloaded as CSV`, 'Download complete');
+      downloadBlob(blob, `${reportType}_report${range}.${format}`);
+      toast.success(`${selectedType?.label || 'Report'} downloaded as ${formatLabel}`, 'Download complete');
     } catch (err) {
-      toast.error(await getBlobErrorMessage(err, 'Failed to download the CSV report'));
+      toast.error(await getBlobErrorMessage(err, `Failed to download the ${formatLabel} report`));
     } finally {
-      setIsDownloading(false);
+      setDownloading(null);
     }
   };
 
@@ -117,7 +120,7 @@ export const ReportsPage: React.FC = () => {
     <div className="space-y-6">
       <PageHeader
         title="Reports"
-        description="Generate user, wallet, investment, profit, maturity, withdrawal, payment and transaction reports, on screen or as CSV."
+        description="Generate user, wallet, investment, profit, maturity, withdrawal, payment and transaction reports, on screen or as CSV / PDF."
       />
 
       {/* Report type */}
@@ -181,9 +184,25 @@ export const ReportsPage: React.FC = () => {
         )}
 
         <div className="flex flex-wrap items-center gap-2.5 md:ml-auto">
-          <button type="button" onClick={handleDownloadCsv} disabled={isDownloading || isDateRangeInvalid} className={btnSecondaryClass}>
-            {isDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+          <button
+            type="button"
+            onClick={() => handleDownload('csv')}
+            disabled={!!downloading || isDateRangeInvalid}
+            aria-busy={downloading === 'csv'}
+            className={btnSecondaryClass}
+          >
+            {downloading === 'csv' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
             Download CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDownload('pdf')}
+            disabled={!!downloading || isDateRangeInvalid}
+            aria-busy={downloading === 'pdf'}
+            className={btnSecondaryClass}
+          >
+            {downloading === 'pdf' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+            Download PDF
           </button>
           <button type="button" onClick={handleGenerate} disabled={isFetching || isDateRangeInvalid} className={btnPrimaryClass}>
             {isFetching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileBarChart className="w-3.5 h-3.5" />}
@@ -260,8 +279,8 @@ export const ReportsPage: React.FC = () => {
             <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-start gap-2 text-xs text-amber-700 dark:text-amber-400">
               <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <span>
-                This report has more rows than can be shown here, so the list below is truncated. Narrow the date range
-                or download the CSV for every row.
+                This report is limited to the first 5,000 rows (on screen and in the CSV / PDF downloads). Narrow the
+                date range to see every row.
               </span>
             </div>
           )}

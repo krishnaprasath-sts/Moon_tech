@@ -1,7 +1,7 @@
 import React, { useState, useId } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
-import { Moon, Lock, Mail, ArrowRight, Loader2, Eye, EyeOff, Sun, AlertCircle } from 'lucide-react';
+import { Moon, TrendingUp, Lock, Mail, ArrowRight, Loader2, Eye, EyeOff, Sun, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useTheme } from '../context/ThemeContext';
@@ -77,10 +77,10 @@ export const LoginPage: React.FC = () => {
       <div className="w-full max-w-md relative z-10">
         <div className="text-center mb-8">
           <div className="inline-flex p-3 rounded-2xl bg-gradient-to-tr from-brand-600 to-blue-600 shadow-xl shadow-brand-500/25 mb-4 text-white">
-            <Moon className="w-8 h-8 fill-white" />
+            <TrendingUp className="w-8 h-8" />
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-            MOON TECH SOLUTIONS
+            CLYVUS VENTURES
           </h1>
           <p className="text-xs uppercase tracking-widest text-brand-600 dark:text-brand-400 font-semibold mt-1">
             Investment Admin Panel

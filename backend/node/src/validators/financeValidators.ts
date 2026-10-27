@@ -11,6 +11,7 @@ import {
 import { MAX_MONEY } from '../utils/money.js';
 
 const hasMaxTwoDecimals = (value: number) => Math.abs(value * 100 - Math.round(value * 100)) < 1e-6;
+const hasMaxFourDecimals = (value: number) => Math.abs(value * 10000 - Math.round(value * 10000)) < 1e-6;
 
 /**
  * Rupee amount: positive, max 2 decimals. Coerced because multipart fields arrive as strings.
@@ -53,6 +54,7 @@ export const updateSettingsSchema = z
       .regex(/^(|[A-Z]{4}0[A-Z0-9]{6})$/, 'Invalid IFSC code (e.g. SBIN0001234)')
       .optional(),
     bankName: z.string().trim().max(100).optional(),
+    bankBranch: z.string().trim().max(100).optional(),
     bankTransferInstructions: z.string().trim().min(5).max(1000).optional(),
     requireKycForInvestment: z.boolean().optional(),
     requireKycForWithdrawal: z.boolean().optional(),
@@ -64,12 +66,30 @@ export const updateSettingsSchema = z
       .max(100, 'Referral commission cannot exceed 100%')
       .refine(hasMaxTwoDecimals, 'Referral commission supports a maximum of 2 decimal places')
       .optional(),
+    dailyReferralCommissionPercent: z.coerce
+      .number({ invalid_type_error: 'Daily referral commission must be a number' })
+      .finite()
+      .min(0, 'Daily referral commission cannot be negative')
+      .max(100, 'Daily referral commission cannot exceed 100%')
+      .refine(hasMaxFourDecimals, 'Daily referral commission supports a maximum of 4 decimal places')
+      .optional(),
     capitalWithdrawalFeePercent: z.coerce
       .number({ invalid_type_error: 'Capital withdrawal fee must be a number' })
       .finite()
       .min(0, 'Capital withdrawal fee cannot be negative')
       .max(100, 'Capital withdrawal fee cannot exceed 100%')
       .refine(hasMaxTwoDecimals, 'Capital withdrawal fee supports a maximum of 2 decimal places')
+      .optional(),
+    // Login page: maintenance switch (blocks customer sign-in and sign-up) and announcement
+    maintenanceMode: z.boolean().optional(),
+    maintenanceMessage: z.string().trim().max(500, 'Maintenance message cannot exceed 500 characters').optional(),
+    loginAnnouncement: z.string().trim().max(1000, 'Announcement cannot exceed 1000 characters').optional(),
+    loginAnnouncementTitle: z.string().trim().max(200, 'Announcement title cannot exceed 200 characters').optional(),
+    companyReferralCode: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^[A-Z]{4}[0-9]{4}$/, 'Company referral code must be 4 letters followed by 4 digits (e.g. CLYV1001)')
       .optional(),
   })
   .refine((value) => Object.keys(value).length > 0, 'At least one setting must be provided');
@@ -125,7 +145,7 @@ const planFields = {
   profitType: z.nativeEnum(ProfitType, { errorMap: () => ({ message: 'Profit type must be PERCENTAGE or FIXED' }) }),
   profitValue: moneySchema('Profit value'),
   payoutMode: z
-    .nativeEnum(ProfitPayoutMode, { errorMap: () => ({ message: 'Payout mode must be AT_MATURITY or DAILY' }) })
+    .nativeEnum(ProfitPayoutMode, { errorMap: () => ({ message: 'Payout mode must be AT_MATURITY, DAILY or MONTHLY' }) })
     .optional(),
   rateBasis: z
     .nativeEnum(RateBasis, { errorMap: () => ({ message: 'Rate basis must be PER_MONTH, PER_YEAR or PER_DAY' }) })
@@ -302,6 +322,7 @@ export const updatePayoutDetailsSchema = z
       .optional()
       .nullable(),
     bankName: optionalText(100),
+    bankBranch: optionalText(100),
   })
   .superRefine((value, ctx) => {
     if (value.preferredMethod === PayoutMethod.UPI && !value.upiId) {
@@ -354,6 +375,8 @@ export const resetPasswordSchema = z.object({
 export const announcementSchema = z.object({
   title: z.string().trim().min(3, 'Title must be at least 3 characters').max(200),
   message: z.string().trim().min(5, 'Message must be at least 5 characters').max(2000),
+  /** Also show this announcement as a popup on the customer login page (default yes) */
+  showOnLoginPage: z.boolean().optional().default(true),
 });
 
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;

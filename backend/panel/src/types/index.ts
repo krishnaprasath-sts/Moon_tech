@@ -70,6 +70,8 @@ export interface CustomerSummary {
   phone: string;
   fullName: string;
   referralCode: string;
+  /** Public customer number, e.g. MT100042 */
+  customerId?: string | null;
   referredBy?: string | null;
   city?: string | null;
   state?: string | null;
@@ -96,6 +98,7 @@ export interface CustomerDetail {
   profile: {
     fullName: string;
     referralCode: string;
+    customerId?: string | null;
     referredBy?: string | null;
     dateOfBirth?: string | null;
     address?: string | null;
@@ -115,6 +118,8 @@ export interface CustomerDetail {
     bankAccountNumber?: string | null;
     accountHolderName?: string;
     ifscCode?: string;
+    bankBranch?: string | null;
+    bankName?: string | null;
     submittedAt?: string;
     reviewedAt?: string;
     rejectionReason?: string;
@@ -158,11 +163,14 @@ export interface KycSubmissionSummary {
   email: string;
   phone: string;
   referralCode: string;
+  customerId?: string | null;
   panMasked: string;
   aadhaarMasked: string;
   bankAccountMasked: string;
   accountHolderName?: string;
   ifscCode?: string;
+  bankBranch?: string | null;
+  bankName?: string | null;
   submittedAt?: string;
   reviewedAt?: string;
   reviewedBy?: { id: number; email: string; role: string } | null;
@@ -185,6 +193,7 @@ export interface KycDetail {
     email: string;
     phone: string;
     referralCode: string;
+    customerId?: string | null;
     referredBy?: string;
     dateOfBirth?: string;
     address?: string;
@@ -202,6 +211,8 @@ export interface KycDetail {
     last4?: string;
     accountHolderName?: string;
     ifscCode?: string;
+    bankBranch?: string | null;
+    bankName?: string | null;
   };
   identityDetails: {
     maskedPan: string;
@@ -443,8 +454,8 @@ export interface DepositApprovalResult extends AdminDeposit {
   transactionReference: string;
 }
 
-/** AT_MATURITY: profit paid with the principal at the end. DAILY: profitValue% credited every working day (Mon-Fri, 6:00 AM IST). */
-export type ProfitPayoutMode = 'AT_MATURITY' | 'DAILY';
+/** AT_MATURITY: profit paid with the principal at the end. DAILY: profitValue% credited every working day. MONTHLY: profitValue% credited monthly on anniversary date. */
+export type ProfitPayoutMode = 'AT_MATURITY' | 'DAILY' | 'MONTHLY';
 
 export interface InvestmentPlan {
   id: number;
@@ -608,6 +619,7 @@ export interface AdminWithdrawal {
   payoutAccountMasked?: string | null;
   payoutIfsc?: string | null;
   payoutBankName?: string | null;
+  payoutBankBranch?: string | null;
   status: WithdrawalStatus;
   rejectionReason?: string | null;
   paymentReference?: string | null;
@@ -619,10 +631,36 @@ export interface AdminWithdrawal {
   customerName?: string | null;
   customerEmail?: string | null;
   customerPhone?: string | null;
+  /** Quick bank-account risk flag for the list view */
+  bankFlag?: WithdrawalBankFlag | null;
+}
+
+export type WithdrawalBankFlag = 'OK' | 'CHANGED' | 'WARNING';
+
+/** Server-side comparison of the payout account against KYC and approved bank changes */
+export interface WithdrawalBankCheck {
+  level: WithdrawalBankFlag;
+  title: string;
+  notes: string[];
+  matchesKyc: boolean | null;
+  source: 'KYC' | 'CHANGE_REQUEST' | 'CUSTOMER' | null;
+  kycAccountMasked?: string | null;
+  kycIfsc?: string | null;
+  kycBankName?: string | null;
+  approvedChange: {
+    id: number;
+    approvedAt: string | null;
+    approvedBy: string | null;
+    previousAccountMasked: string | null;
+    previousIfsc: string | null;
+    previousBankName: string | null;
+  } | null;
+  pendingChangeRequestId: number | null;
 }
 
 export interface AdminWithdrawalDetail extends AdminWithdrawal {
   payoutAccountNumber?: string | null;
+  bankCheck?: WithdrawalBankCheck | null;
   investment?: {
     id: number;
     reference: string;
@@ -646,6 +684,7 @@ export interface PayoutDetails {
   accountNumber?: string | null;
   ifscCode?: string | null;
   bankName?: string | null;
+  bankBranch?: string | null;
   hasBankDetails: boolean;
   hasUpiDetails: boolean;
   updatedAt?: string | null;
@@ -755,14 +794,28 @@ export interface PlatformSettings {
   bankAccountNumber: string;
   bankIfsc: string;
   bankName: string;
+  /** Branch of the company account (optional, shown with the transfer details) */
+  bankBranch: string;
   bankTransferInstructions: string;
   requireKycForInvestment: boolean;
   requireKycForWithdrawal: boolean;
   walletMinWithdrawal: number;
   /** One-time referral commission, % of the referred customer's investment amount */
   referralCommissionPercent: number;
+  /** Daily recurring referral commission, % of active referred investments credited each working day (0.025% = 0.5% / month) */
+  dailyReferralCommissionPercent?: number;
   /** Deducted from capital withdrawals (closing an investment or withdrawing the capital wallet); profit withdrawals are free */
   capitalWithdrawalFeePercent: number;
+  /** Customers cannot sign in or register while on; staff still can and payouts keep running */
+  maintenanceMode: boolean;
+  /** Shown on the customer login / registration pages while maintenance mode is on */
+  maintenanceMessage: string;
+  /** Announcement shown as a popup on the customer login page; empty = none */
+  loginAnnouncement: string;
+  /** Heading of that popup (title of the last pushed announcement) */
+  loginAnnouncementTitle: string;
+  /** Company referral code that works for registration before any customer exists; pays no commission */
+  companyReferralCode: string;
 }
 
 export interface PayoutJobStatus {
@@ -855,4 +908,116 @@ export interface FinanceReport {
   truncated: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Support chat
+// ---------------------------------------------------------------------------
+export type SupportTopic = 'KYC' | 'DEPOSIT' | 'WITHDRAWAL' | 'PLANS';
+export type SupportSender = 'CUSTOMER' | 'ADMIN';
 
+export interface SupportMessage {
+  id: number;
+  userId: number;
+  topic: SupportTopic;
+  sender: SupportSender;
+  adminUserId: number | null;
+  adminEmail: string | null;
+  message: string;
+  readByCustomer: boolean;
+  readByAdmin: boolean;
+  createdAt: string;
+}
+
+/** One row per customer in the admin inbox */
+export interface SupportThread {
+  userId: number;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  topics: SupportTopic[];
+  lastMessage: string;
+  lastTopic: SupportTopic;
+  lastSender: SupportSender;
+  lastMessageAt: string | null;
+  unreadCount: number;
+  messageCount: number;
+}
+
+export interface SupportThreadDetail {
+  customer: { userId: number; name: string; email: string; phone: string };
+  messages: SupportMessage[];
+}
+
+/** Visitor (not signed in) conversation in the admin inbox */
+export interface GuestThread {
+  guestId: number;
+  name: string;
+  email: string;
+  phone: string;
+  topics: SupportTopic[];
+  lastMessage: string;
+  lastTopic: SupportTopic;
+  lastSender: SupportSender;
+  lastMessageAt: string | null;
+  unreadCount: number;
+  messageCount: number;
+}
+
+export interface GuestThreadDetail {
+  guest: { guestId: number; name: string; email: string; phone: string };
+  messages: (Omit<SupportMessage, 'userId' | 'readByCustomer'> & { guestId: number; readByGuest: boolean })[];
+}
+
+export interface SupportUnread {
+  unreadCount: number;
+  openThreads: number;
+  customers?: { unreadCount: number; openThreads: number };
+  visitors?: { unreadCount: number; openThreads: number };
+}
+
+// ---------------------------------------------------------------------------
+// Payout bank account change requests
+// ---------------------------------------------------------------------------
+export type BankChangeStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+
+export interface BankAccountSnapshot {
+  accountHolderName: string | null;
+  accountNumberMasked: string | null;
+  ifscCode: string | null;
+  bankName: string | null;
+  bankBranch: string | null;
+}
+
+export interface BankChangeRequest {
+  id: number;
+  status: BankChangeStatus;
+  customer: { userId: number; name: string; customerId: string | null; email: string; phone: string };
+  requested: BankAccountSnapshot & {
+    /** Full new account number; only returned to SUPER_ADMIN / ADMIN */
+    accountNumber: string | null;
+  };
+  previous: BankAccountSnapshot | null;
+  /** The new account holder differs from the current one - a strong fraud signal */
+  holderNameChanged: boolean;
+  reason: string | null;
+  adminRemarks: string | null;
+  /** Reviewer email */
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  ipAddress: string | null;
+}
+
+export interface BankChangeRequestDetail extends BankChangeRequest {
+  kyc: (BankAccountSnapshot & {
+    status: KycStatus;
+    requestedMatchesKyc: boolean;
+    holderMatchesKyc: boolean;
+  }) | null;
+  /** Pending / approved withdrawals that will still be paid to the old account */
+  openWithdrawals: number;
+  previousRequests: number;
+}
+
+export interface BankChangeListMeta extends PaginationMeta {
+  pendingCount: number;
+}

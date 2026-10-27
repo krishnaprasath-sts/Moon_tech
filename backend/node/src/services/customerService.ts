@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { customerIdFor } from '../utils/customerId.js';
 import { Op } from 'sequelize';
 import { User, CustomerProfile, KycProfile, Referral, ActivityLog, Investment } from '../models/index.js';
 import { CustomerFilterParams, UserRole, UserStatus, KycStatus, ReferralStatus, InvestmentStatus, JwtUserPayload } from '../types/index.js';
@@ -51,7 +52,7 @@ export class CustomerService {
         {
           model: CustomerProfile,
           as: 'profile',
-          attributes: ['full_name', 'referral_code', 'referred_by', 'city', 'state'],
+          attributes: ['full_name', 'referral_code', 'customer_id', 'referred_by', 'city', 'state'],
         },
         {
           model: KycProfile,
@@ -82,6 +83,7 @@ export class CustomerService {
         phone: u.phone,
         fullName: p?.full_name || 'N/A',
         referralCode: p?.referral_code || 'N/A',
+        customerId: p?.customer_id || null,
         referredBy: p?.referred_by || null,
         city: p?.city || null,
         state: p?.state || null,
@@ -171,6 +173,7 @@ export class CustomerService {
         ? {
             fullName: p.full_name,
             referralCode: p.referral_code,
+            customerId: p.customer_id,
             referredBy: p.referred_by,
             dateOfBirth: p.date_of_birth,
             address: p.address,
@@ -289,6 +292,7 @@ export class CustomerService {
       user_id: user.id,
       full_name: name.trim(),
       referral_code,
+      customer_id: customerIdFor(user.id),
       referred_by: referralNumber ? referralNumber.toUpperCase().trim() : null,
       date_of_birth: dateOfBirth || null,
       address: address || null,
@@ -330,6 +334,7 @@ export class CustomerService {
       phone: user.phone,
       fullName: profile.full_name,
       referralCode: profile.referral_code,
+      customerId: profile.customer_id,
       referredBy: profile.referred_by,
       status: user.status,
       kycStatus: kyc.kyc_status,

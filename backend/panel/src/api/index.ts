@@ -32,6 +32,13 @@ import {
   PayoutJobStatus,
   PayoutRunResult,
   AdminReferralCommission,
+  SupportMessage,
+  SupportThread,
+  SupportThreadDetail,
+  SupportTopic,
+  SupportUnread,
+  GuestThread,
+  GuestThreadDetail,
 } from '../types';
 
 export type KycDocumentType = 'passbook' | 'pan' | 'aadhaar' | 'aadhaar-back';
@@ -227,6 +234,8 @@ export interface ReportParams {
   endDate?: string;
 }
 
+export type ReportDownloadFormat = 'csv' | 'pdf';
+
 export const financeApi = {
   // Dashboard & customer finance
   getDashboard: async () => {
@@ -384,7 +393,7 @@ export const financeApi = {
     const res = await apiClient.get<ApiResponse<Announcement[]>>('/admin/announcements', { params });
     return res.data;
   },
-  createAnnouncement: async (data: { title: string; message: string }) => {
+  createAnnouncement: async (data: { title: string; message: string; showOnLoginPage?: boolean }) => {
     const res = await apiClient.post<ApiResponse<Announcement>>('/admin/announcements', data);
     return res.data;
   },
@@ -397,11 +406,54 @@ export const financeApi = {
     return res.data;
   },
   // Fetched as a blob with the bearer header so the token never appears in a URL
-  downloadReportCsv: async (type: ReportType, params?: ReportParams) => {
+  downloadReport: async (type: ReportType, params: ReportParams | undefined, format: ReportDownloadFormat) => {
     const res = await apiClient.get<Blob>(`/admin/reports/${type}`, {
-      params: { ...params, format: 'csv' },
+      params: { ...params, format },
       responseType: 'blob',
     });
+    return res.data;
+  },
+};
+
+// Support chat (customer <-> admin)
+export interface SupportThreadsParams {
+  page?: number;
+  limit?: number;
+  topic?: SupportTopic;
+  status?: 'open' | 'all';
+  search?: string;
+}
+
+export const supportApi = {
+  getThreads: async (params?: SupportThreadsParams) => {
+    const res = await apiClient.get<ApiResponse<SupportThread[]>>('/admin/support/threads', { params });
+    return res.data;
+  },
+  getThread: async (userId: number | string, topic?: SupportTopic) => {
+    const res = await apiClient.get<ApiResponse<SupportThreadDetail>>(`/admin/support/threads/${userId}`, {
+      params: topic ? { topic } : undefined,
+    });
+    return res.data;
+  },
+  reply: async (userId: number | string, data: { topic: SupportTopic; message: string }) => {
+    const res = await apiClient.post<ApiResponse<SupportMessage>>(`/admin/support/threads/${userId}/reply`, data);
+    return res.data;
+  },
+  getUnreadCount: async () => {
+    const res = await apiClient.get<ApiResponse<SupportUnread>>('/admin/support/unread-count');
+    return res.data;
+  },
+  // Visitors who wrote before signing in
+  getGuestThreads: async (params?: Omit<SupportThreadsParams, 'topic'>) => {
+    const res = await apiClient.get<ApiResponse<GuestThread[]>>('/admin/support/guests', { params });
+    return res.data;
+  },
+  getGuestThread: async (guestId: number | string) => {
+    const res = await apiClient.get<ApiResponse<GuestThreadDetail>>(`/admin/support/guests/${guestId}`);
+    return res.data;
+  },
+  replyToGuest: async (guestId: number | string, data: { topic: SupportTopic; message: string }) => {
+    const res = await apiClient.post<ApiResponse<SupportMessage>>(`/admin/support/guests/${guestId}/reply`, data);
     return res.data;
   },
 };

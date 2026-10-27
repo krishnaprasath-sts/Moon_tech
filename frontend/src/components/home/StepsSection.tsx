@@ -4,22 +4,22 @@ const STEPS = [
   {
     step: '01',
     title: 'Create your account',
-    desc: 'Register with your name, email and mobile number. Your account is where your programs, sessions and progress live.',
+    desc: 'Sign up with your name, email and mobile number. It takes one minute.',
   },
   {
     step: '02',
-    title: 'Pick a program',
-    desc: 'Start with Foundations if you are new, or jump straight to Technical Analysis or Derivatives if you already trade.',
+    title: 'Choose a course',
+    desc: 'New to shares? Start with Stock Market Basics. Already know a little? Pick any course.',
   },
   {
     step: '03',
-    title: 'Learn in live sessions',
-    desc: 'Attend live online classes with chart walk-throughs and real market examples. Recordings are available if you miss one.',
+    title: 'Join live classes',
+    desc: 'Learn online from your phone or laptop. Missed a class? Watch the recording.',
   },
   {
     step: '04',
     title: 'Practise with a mentor',
-    desc: 'Plan trades, keep a journal and review your decisions with a mentor until a disciplined routine becomes second nature.',
+    desc: 'Try what you learned in the real market. Your mentor checks your trades and helps you improve.',
   },
 ];
 
@@ -30,16 +30,17 @@ export const StepsSection: React.FC = () => {
       className="py-20 border-t border-b border-zinc-200 dark:border-white/[0.06] bg-zinc-100/50 dark:bg-zinc-950/40 transition-colors duration-200 scroll-mt-16"
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center max-w-xl mx-auto mb-14">
+        <div data-reveal className="text-center max-w-xl mx-auto mb-14">
           <h2 className="text-2xl sm:text-3xl font-bold text-zinc-950 dark:text-white tracking-tight">How it works</h2>
           <p className="text-zinc-600 dark:text-zinc-400 text-xs sm:text-sm mt-2">
-            Four simple steps from your first login to trading the live market with a plan.
+            Four easy steps to get started.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div data-reveal-group className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {STEPS.map((s) => (
             <div
+              data-reveal
               key={s.step}
               className="group p-6 rounded-2xl bg-white dark:bg-zinc-900/30 border border-zinc-200 dark:border-white/[0.07] hover:border-blue-500/30 dark:hover:border-blue-400/30 hover:-translate-y-1.5 hover:shadow-xl shadow-xs transition-all duration-300 cursor-default"
             >

@@ -4,6 +4,7 @@ import { useAnnouncements, useCreateAnnouncement } from '../hooks';
 import { Pagination } from '../components/Pagination';
 import { PageHeader } from '../components/PageHeader';
 import { RefreshButton } from '../components/RefreshButton';
+import { LoginPageSettingsCard } from '../components/LoginPageSettingsCard';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Field, FormError, ErrorState, Spinner, ViewOnlyNote, inputClass, textareaClass, btnPrimaryClass, cardClass, tableCardClass } from '../components/ui';
@@ -17,6 +18,7 @@ export const AnnouncementsPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
+  const [showOnLoginPage, setShowOnLoginPage] = useState(true);
   const [errors, setErrors] = useState<{ title?: string; message?: string }>({});
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -42,7 +44,7 @@ export const AnnouncementsPage: React.FC = () => {
     if (Object.keys(next).length > 0) return;
 
     try {
-      const res = await createAnnouncement({ title: cleanTitle, message: cleanMessage });
+      const res = await createAnnouncement({ title: cleanTitle, message: cleanMessage, showOnLoginPage });
       const recipients = res.data?.recipientsCount;
       toast.success(
         typeof recipients === 'number'
@@ -64,7 +66,7 @@ export const AnnouncementsPage: React.FC = () => {
     <div className="space-y-6">
       <PageHeader
         title="Announcements"
-        description="Broadcast a notification to every customer and review what has already been sent."
+        description="Broadcast a notification to every customer, manage the login-page popup and maintenance mode, and review what has already been sent."
         viewOnly={!isAdmin}
         actions={<RefreshButton onClick={() => refetch()} isFetching={isFetching} />}
       />
@@ -123,6 +125,21 @@ export const AnnouncementsPage: React.FC = () => {
                   </p>
                 )}
               </div>
+
+              <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showOnLoginPage}
+                  onChange={(e) => setShowOnLoginPage(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                />
+                <span className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                  <span className="font-semibold">Also show as a popup on the login page</span>
+                  <span className="block text-[11px] text-slate-500 dark:text-slate-400">
+                    Replaces the current login-page announcement. You can edit or clear it below at any time.
+                  </span>
+                </span>
+              </label>
 
               <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
                 The announcement is delivered immediately to every customer with an active account and cannot be recalled.
@@ -199,6 +216,9 @@ export const AnnouncementsPage: React.FC = () => {
           <Pagination meta={data?.meta} onPageChange={setPage} />
         </div>
       </div>
+
+      {/* Login-page popup (set automatically by the last pushed announcement) and maintenance mode */}
+      <LoginPageSettingsCard />
     </div>
   );
 };

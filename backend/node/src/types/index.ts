@@ -147,6 +147,7 @@ export enum ProfitType {
 export enum ProfitPayoutMode {
   AT_MATURITY = 'AT_MATURITY',
   DAILY = 'DAILY',
+  MONTHLY = 'MONTHLY',
 }
 
 /** Where the money of a withdrawal request comes from */
@@ -199,5 +200,39 @@ export enum NotificationType {
   KYC_REJECTED = 'KYC_REJECTED',
   KYC_RESUBMISSION_REQUIRED = 'KYC_RESUBMISSION_REQUIRED',
   ANNOUNCEMENT = 'ANNOUNCEMENT',
+  SUPPORT_REPLY = 'SUPPORT_REPLY',
+  BANK_CHANGE_APPROVED = 'BANK_CHANGE_APPROVED',
+  BANK_CHANGE_REJECTED = 'BANK_CHANGE_REJECTED',
+}
+
+/** Customer request to replace the bank account used for withdrawals */
+export enum BankChangeStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  CANCELLED = 'CANCELLED',
+}
+
+/** Where the bank account that withdrawals are paid to came from */
+export enum BankSource {
+  /** Copied from the KYC submission (verified when the KYC is verified) */
+  KYC = 'KYC',
+  /** Set by an admin-approved bank change request */
+  CHANGE_REQUEST = 'CHANGE_REQUEST',
+  /** Typed in by the customer before KYC; not verified by anyone */
+  CUSTOMER = 'CUSTOMER',
+}
+
+/** Subject a customer picks before writing to support */
+export enum SupportTopic {
+  KYC = 'KYC',
+  DEPOSIT = 'DEPOSIT',
+  WITHDRAWAL = 'WITHDRAWAL',
+  PLANS = 'PLANS',
+}
+
+export enum SupportSender {
+  CUSTOMER = 'CUSTOMER',
+  ADMIN = 'ADMIN',
 }
 

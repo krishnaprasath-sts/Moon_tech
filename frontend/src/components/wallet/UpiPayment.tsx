@@ -40,7 +40,7 @@ export function UpiPayment({
   upiId,
   payeeName,
   amount,
-  note = 'Moon Tech wallet top-up',
+  note = 'Clyvus Ventures wallet top-up',
   qrImageUrl,
 }: {
   upiId: string;

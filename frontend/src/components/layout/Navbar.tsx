@@ -16,9 +16,9 @@ const UNREAD_POLL_INTERVAL_MS = 60_000;
 
 // Visitors see the training company; plan pages appear only after login
 const VISITOR_LINKS = [
-  { label: 'Programs', href: '/#programs' },
+  { label: 'Courses', href: '/#programs' },
   { label: 'How it works', href: '/#how-it-works' },
-  { label: 'Why MoonTech', href: '/#why-us' },
+  { label: 'Why Clyvus Ventures', href: '/#why-us' },
   { label: 'FAQ', href: '/#faq' },
 ];
 
@@ -85,6 +85,15 @@ export const Navbar: React.FC = () => {
     return () => window.removeEventListener('keydown', handleEsc);
   }, [mobileMenuOpen]);
 
+  // A soft shadow appears once the page scrolls under the bar
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 4);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   const isAuthenticated = Boolean(token);
   const unreadCount = useUnreadCount(token);
   const unreadLabel = unreadCount > 99 ? '99+' : String(unreadCount);
@@ -96,6 +105,22 @@ export const Navbar: React.FC = () => {
     closeMenu();
     logout();
   };
+
+  // Sun and moon swap with a spin
+  const themeIcon = (
+    <span className="relative block w-4 h-4" aria-hidden="true">
+      <Sun
+        className={`absolute inset-0 w-4 h-4 text-amber-400 transition-[opacity,transform] duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
+          theme === 'dark' ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-50'
+        }`}
+      />
+      <Moon
+        className={`absolute inset-0 w-4 h-4 text-zinc-700 transition-[opacity,transform] duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
+          theme === 'dark' ? 'opacity-0 rotate-90 scale-50' : 'opacity-100 rotate-0 scale-100'
+        }`}
+      />
+    </span>
+  );
 
   const bell = (
     <Link
@@ -116,7 +141,13 @@ export const Navbar: React.FC = () => {
 
   return (
     <>
-      <header className="sticky top-0 z-40 w-full bg-white/80 dark:bg-[#09090b]/80 backdrop-blur-xl border-b border-zinc-200/80 dark:border-white/[0.06] transition-colors duration-200">
+      <header
+        className={`vt-site-header sticky top-0 z-40 w-full backdrop-blur-xl border-b transition-[background-color,border-color,box-shadow] duration-300 ${
+          scrolled || mobileMenuOpen
+            ? 'bg-white/85 dark:bg-[#09090b]/85 border-zinc-200/80 dark:border-white/[0.08] shadow-lg shadow-zinc-900/[0.06] dark:shadow-black/60'
+            : 'bg-white/60 dark:bg-[#09090b]/60 border-transparent shadow-none'
+        }`}
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16 gap-4">
 
@@ -132,13 +163,20 @@ export const Navbar: React.FC = () => {
                     key={link.label}
                     href={link.href}
                     aria-current={isActive ? 'page' : undefined}
-                    className={`text-[13px] font-medium transition duration-150 ${
+                    className={`group relative py-1 text-[13px] font-medium transition-colors duration-200 ${
                       isActive
                         ? 'text-blue-600 dark:text-white font-semibold'
                         : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-zinc-200'
                     }`}
                   >
                     {link.label}
+                    {/* Underline that slides out from the centre on hover, and stays on the current page */}
+                    <span
+                      aria-hidden="true"
+                      className={`absolute left-0 right-0 -bottom-0.5 h-0.5 rounded-full bg-blue-600 dark:bg-blue-400 origin-center transition-transform duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${
+                        isActive ? 'scale-x-100' : 'scale-x-0 group-hover:scale-x-100'
+                      }`}
+                    />
                   </Link>
                 );
               })}
@@ -154,7 +192,7 @@ export const Navbar: React.FC = () => {
                 title={themeLabel}
                 aria-label={themeLabel}
               >
-                {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-zinc-700" />}
+                {themeIcon}
               </button>
 
               {isAuthenticated && bell}
@@ -192,7 +230,7 @@ export const Navbar: React.FC = () => {
                 aria-label={themeLabel}
                 className="p-2 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer"
               >
-                {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-zinc-700" />}
+                {themeIcon}
               </button>
               {isAuthenticated && bell}
               <button
@@ -203,27 +241,47 @@ export const Navbar: React.FC = () => {
                 aria-controls="mobile-menu"
                 className="p-2 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white cursor-pointer"
               >
-                {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+                <span className="relative block w-5 h-5" aria-hidden="true">
+                  <Menu
+                    className={`absolute inset-0 w-5 h-5 transition-[opacity,transform] duration-300 ${
+                      mobileMenuOpen ? 'opacity-0 rotate-90 scale-75' : 'opacity-100 rotate-0 scale-100'
+                    }`}
+                  />
+                  <X
+                    className={`absolute inset-0 w-5 h-5 transition-[opacity,transform] duration-300 ${
+                      mobileMenuOpen ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-90 scale-75'
+                    }`}
+                  />
+                </span>
               </button>
             </div>
 
           </div>
         </div>
 
-        {/* Mobile Dropdown */}
-        {mobileMenuOpen && (
+        {/* Mobile Dropdown: slides open (height animates via grid rows); hidden from keyboard and screen readers when closed */}
+        <div
+          className={`lg:hidden grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${
+            mobileMenuOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+          }`}
+          inert={!mobileMenuOpen}
+        >
+          <div className="overflow-hidden min-h-0">
           <nav
             id="mobile-menu"
             aria-label="Main"
-            className="lg:hidden bg-white dark:bg-[#0c0c0e] border-b border-zinc-200 dark:border-white/[0.08] px-4 pt-3 pb-6 space-y-1"
+            className="bg-white dark:bg-[#0c0c0e] border-b border-zinc-200 dark:border-white/[0.08] px-4 pt-3 pb-6 space-y-1"
           >
-            {navLinks.map((link) => (
+            {navLinks.map((link, index) => (
               <Link
                 key={link.label}
                 href={link.href}
                 onClick={closeMenu}
                 aria-current={pathname === link.href ? 'page' : undefined}
-                className={`block text-sm font-medium py-2 ${
+                style={{ transitionDelay: mobileMenuOpen ? `${60 + index * 35}ms` : '0ms' }}
+                className={`block text-sm font-medium py-2 transition-[opacity,transform,color] duration-300 ${
+                  mobileMenuOpen ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1'
+                } ${
                   pathname === link.href
                     ? 'text-blue-600 dark:text-white font-semibold'
                     : 'text-zinc-700 dark:text-zinc-300 hover:text-blue-600 dark:hover:text-white'
@@ -269,7 +327,8 @@ export const Navbar: React.FC = () => {
               )}
             </div>
           </nav>
-        )}
+          </div>
+        </div>
       </header>
 
     </>

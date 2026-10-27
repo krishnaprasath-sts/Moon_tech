@@ -289,7 +289,7 @@ export default function ForgotPasswordPage() {
 
       <div className="mt-8 text-center text-xs text-zinc-500">
         <Link href="/" className="hover:text-zinc-800 dark:hover:text-zinc-300 transition">
-          ← Back to MoonTech Home
+          ← Back to Clyvus Ventures Home
         </Link>
       </div>
     </div>

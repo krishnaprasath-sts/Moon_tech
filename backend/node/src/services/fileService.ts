@@ -136,7 +136,7 @@ export class FileService {
   public static async savePaymentDocument(
     userId: number,
     file: Express.Multer.File,
-    fileType: 'DEPOSIT_RECEIPT' | 'PAYOUT_PROOF'
+    fileType: 'DEPOSIT_RECEIPT' | 'PAYOUT_PROOF' | 'BANK_PROOF'
   ): Promise<ProcessedFileInfo> {
     await this.ensureStorageDir();
 

@@ -6,6 +6,8 @@ export interface CustomerProfileAttributes {
   user_id: number;
   full_name: string;
   referral_code: string;
+  /** Public customer number shown to the customer and staff (e.g. MT100042); unique */
+  customer_id?: string | null;
   referred_by?: string | null;
   date_of_birth?: string | null;
   address?: string | null;
@@ -20,6 +22,7 @@ export interface CustomerProfileCreationAttributes
   extends Optional<
     CustomerProfileAttributes,
     | 'id'
+    | 'customer_id'
     | 'referred_by'
     | 'date_of_birth'
     | 'address'
@@ -38,6 +41,7 @@ export class CustomerProfile
   declare public user_id: number;
   declare public full_name: string;
   declare public referral_code: string;
+  declare public customer_id: string | null;
   declare public referred_by: string | null;
   declare public date_of_birth: string | null;
   declare public address: string | null;
@@ -73,6 +77,11 @@ CustomerProfile.init(
       allowNull: false,
       unique: true,
     },
+    customer_id: {
+      type: DataTypes.STRING(16),
+      allowNull: true,
+      unique: true,
+    },
     referred_by: {
       type: DataTypes.STRING(50),
       allowNull: true,
@@ -106,6 +115,7 @@ CustomerProfile.init(
     indexes: [
       { fields: ['user_id'], unique: true },
       { fields: ['referral_code'], unique: true },
+      { fields: ['customer_id'], unique: true },
       { fields: ['referred_by'] },
       { fields: ['full_name'] },
     ],

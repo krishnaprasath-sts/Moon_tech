@@ -27,6 +27,9 @@ export interface WithdrawalAttributes {
   payout_account_last4?: string | null;
   payout_ifsc?: string | null;
   payout_bank_name?: string | null;
+  payout_bank_branch?: string | null;
+  payout_account_hash?: string | null;
+  payout_bank_source?: string | null;
   status: WithdrawalStatus;
   admin_remarks?: string | null;
   rejection_reason?: string | null;
@@ -57,6 +60,9 @@ export interface WithdrawalCreationAttributes
     | 'payout_account_last4'
     | 'payout_ifsc'
     | 'payout_bank_name'
+    | 'payout_bank_branch'
+    | 'payout_account_hash'
+    | 'payout_bank_source'
     | 'status'
     | 'admin_remarks'
     | 'rejection_reason'
@@ -94,6 +100,9 @@ export class Withdrawal
   declare public payout_account_last4: string | null;
   declare public payout_ifsc: string | null;
   declare public payout_bank_name: string | null;
+  declare public payout_bank_branch: string | null;
+  declare public payout_account_hash: string | null;
+  declare public payout_bank_source: string | null;
   declare public status: WithdrawalStatus;
   declare public admin_remarks: string | null;
   declare public rejection_reason: string | null;
@@ -211,6 +220,18 @@ Withdrawal.init(
     },
     payout_bank_name: {
       type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+    payout_bank_branch: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+    payout_account_hash: {
+      type: DataTypes.STRING(64),
+      allowNull: true,
+    },
+    payout_bank_source: {
+      type: DataTypes.STRING(20),
       allowNull: true,
     },
     status: {

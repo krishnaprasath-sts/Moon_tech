@@ -120,15 +120,20 @@ export const InvestmentDetailModal: React.FC<InvestmentDetailModalProps> = ({ in
                     {!investment.isOpenEnded ? ` · ${investment.profitDays} paying days` : ''}
                   </p>
                 )}
+                {investment.payoutMode === 'MONTHLY' && (
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    {formatINR(investment.monthlyProfit)} / month · credited on start date at 6:00 AM IST
+                  </p>
+                )}
               </div>
               <div className="p-4 rounded-2xl bg-brand-500/5 border border-brand-500/20">
                 <p className="text-[11px] uppercase font-semibold text-slate-500">
-                  {investment.payoutMode === 'DAILY' ? 'Profit Credited So Far' : 'Maturity Amount'}
+                  {investment.payoutMode === 'DAILY' || investment.payoutMode === 'MONTHLY' ? 'Profit Credited So Far' : 'Maturity Amount'}
                 </p>
                 <p className="text-lg font-bold font-mono tabular-nums text-brand-600 dark:text-brand-400">
-                  {formatINR(investment.payoutMode === 'DAILY' ? investment.profitCredited : investment.maturityAmount)}
+                  {formatINR(investment.payoutMode === 'DAILY' || investment.payoutMode === 'MONTHLY' ? investment.profitCredited : investment.maturityAmount)}
                 </p>
-                {investment.payoutMode === 'DAILY' && (
+                {(investment.payoutMode === 'DAILY' || investment.payoutMode === 'MONTHLY') && (
                   <p className="text-[11px] text-slate-500 mt-1">
                     {investment.isOpenEnded
                       ? `Capital returned when closed, less ${investment.feePercent}% fee (${formatINR(investment.netCapitalOnWithdrawal)} net)`
@@ -187,7 +192,9 @@ export const InvestmentDetailModal: React.FC<InvestmentDetailModalProps> = ({ in
               <DetailSection title="Plan">
                 <DetailField label="Plan Name">{investment.planName}</DetailField>
                 <DetailField label="Profit">
-                  {investment.payoutMode === 'DAILY'
+                  {investment.payoutMode === 'MONTHLY'
+                    ? `${investment.profitValue}% of capital credited monthly on start date at 6:00 AM IST`
+                    : investment.payoutMode === 'DAILY'
                     ? investment.rateBasis === 'PER_MONTH'
                       ? `${investment.profitValue}% of capital per month = ${investment.dailyRatePercent}% per working day, 20 credits a month (Mon–Fri, 6:00 AM IST)`
                       : investment.rateBasis === 'PER_YEAR'
@@ -258,8 +265,8 @@ export const InvestmentDetailModal: React.FC<InvestmentDetailModalProps> = ({ in
               </DetailSection>
             </div>
 
-            {investment.payoutMode === 'DAILY' && (
-              <DetailSection title="Daily profit credits">
+            {(investment.payoutMode === 'DAILY' || investment.payoutMode === 'MONTHLY') && (
+              <DetailSection title={investment.payoutMode === 'MONTHLY' ? 'Monthly profit credits' : 'Daily profit credits'}>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-300">
                   <span>
                     {investment.creditsPerCycle ? (

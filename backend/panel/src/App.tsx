@@ -19,6 +19,8 @@ import { WithdrawalsPage } from './pages/WithdrawalsPage';
 import { WalletLedgerPage } from './pages/WalletLedgerPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { AnnouncementsPage } from './pages/AnnouncementsPage';
+import { SupportPage } from './pages/SupportPage';
+import { BankChangesPage } from './pages/BankChangesPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { LoginLocationState } from './types';
 
@@ -98,10 +100,12 @@ export const App: React.FC = () => {
           <Route path="wallet-transactions" element={<WalletLedgerPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="announcements" element={<AnnouncementsPage />} />
+          <Route path="support" element={<SupportPage />} />
           <Route path="customers" element={<CustomersPage />} />
           <Route path="customers/:id" element={<CustomerDetailPage />} />
           <Route path="kyc" element={<KycQueuePage />} />
           <Route path="kyc/:id" element={<KycReviewPage />} />
+          <Route path="bank-changes" element={<BankChangesPage />} />
           <Route path="referrals" element={<ReferralsPage />} />
           <Route path="activity-logs" element={<ActivityLogsPage />} />
           <Route

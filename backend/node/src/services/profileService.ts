@@ -1,15 +1,16 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { Op } from 'sequelize';
-import { User, CustomerProfile, UserPayoutDetail, PasswordReset } from '../models/index.js';
-import { PayoutMethod, UserRole, UserStatus } from '../types/index.js';
-import { BadRequestError, ForbiddenError, NotFoundError, UnauthorizedError } from '../utils/errors.js';
+import { User, CustomerProfile, UserPayoutDetail, PasswordReset, BankChangeRequest } from '../models/index.js';
+import { BankChangeStatus, BankSource, PayoutMethod, UserRole, UserStatus } from '../types/index.js';
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError, UnauthorizedError } from '../utils/errors.js';
 import { encryptData } from '../utils/encryption.js';
 import { maskBankAccount } from '../utils/mask.js';
 import { toIso } from '../utils/dates.js';
 import { RequestMeta } from '../utils/http.js';
 import { ActivityLogService } from './activityLogService.js';
 import { EmailService } from './emailService.js';
+import { accountFingerprint } from './bankAccountService.js';
 import {
   UpdateProfileInput,
   UpdatePayoutDetailsInput,
@@ -31,8 +32,15 @@ export function serializePayoutDetail(detail: UserPayoutDetail | null) {
     accountNumberMasked: detail.account_last4 ? maskBankAccount(`XXXXXXXX${detail.account_last4}`) : null,
     ifscCode: detail.ifsc_code,
     bankName: detail.bank_name,
+    bankBranch: detail.bank_branch,
     hasBankDetails: Boolean(detail.account_number_encrypted && detail.ifsc_code && detail.account_holder_name),
     hasUpiDetails: Boolean(detail.upi_id),
+    // KYC = from KYC, CHANGE_REQUEST = admin-approved change, CUSTOMER = self-entered (not verified)
+    bankSource: detail.bank_source || null,
+    bankVerified: Boolean(detail.bank_verified_at),
+    bankVerifiedAt: toIso(detail.bank_verified_at),
+    // Once an account is on file it can only be replaced through an approved change request
+    bankLocked: Boolean(detail.account_number_encrypted),
     updatedAt: toIso(detail.updated_at),
   };
 }
@@ -60,6 +68,7 @@ export class ProfileService {
       status: user.status,
       fullName: profile?.full_name || null,
       referralCode: profile?.referral_code || null,
+      customerId: profile?.customer_id || null,
       dateOfBirth: profile?.date_of_birth || null,
       address: profile?.address || null,
       city: profile?.city || null,
@@ -118,6 +127,27 @@ export class ProfileService {
 
     const existing = await UserPayoutDetail.findOne({ where: { user_id: userId } });
 
+    // The bank account withdrawals are paid to can be entered once; after that a change needs
+    // admin approval (Profile > Bank details > Request a change), so a payout can never be
+    // redirected silently.
+    if (existing?.account_number_encrypted) {
+      const touchesBank =
+        Boolean(input.accountNumber) ||
+        (input.accountHolderName !== undefined && (input.accountHolderName || null) !== existing.account_holder_name) ||
+        (input.ifscCode !== undefined && (input.ifscCode || null) !== existing.ifsc_code) ||
+        (input.bankName !== undefined && (input.bankName?.trim() || null) !== existing.bank_name) ||
+        (input.bankBranch !== undefined && (input.bankBranch?.trim() || null) !== existing.bank_branch) ||
+        input.accountNumber === null;
+      if (touchesBank) {
+        const pending = await BankChangeRequest.count({ where: { user_id: userId, status: BankChangeStatus.PENDING } });
+        throw new ConflictError(
+          pending > 0
+            ? 'Your bank change request is waiting for approval. Bank details cannot be edited until it is reviewed.'
+            : 'Your bank account is locked for security. To use a different account, submit a bank change request with proof.'
+        );
+      }
+    }
+
     const next = {
       preferred_method: input.preferredMethod,
       upi_id: input.upiId !== undefined ? input.upiId || null : existing?.upi_id ?? null,
@@ -129,11 +159,14 @@ export class ProfileService {
       account_last4: existing?.account_last4 ?? null,
       ifsc_code: input.ifscCode !== undefined ? input.ifscCode || null : existing?.ifsc_code ?? null,
       bank_name: input.bankName !== undefined ? input.bankName?.trim() || null : existing?.bank_name ?? null,
+      bank_branch: input.bankBranch !== undefined ? input.bankBranch?.trim() || null : existing?.bank_branch ?? null,
     };
 
-    if (input.accountNumber) {
+    let firstBankEntry = false;
+    if (input.accountNumber && !existing?.account_number_encrypted) {
       next.account_number_encrypted = encryptData(input.accountNumber);
       next.account_last4 = input.accountNumber.slice(-4);
+      firstBankEntry = true;
     } else if (input.accountNumber === null) {
       next.account_number_encrypted = null;
       next.account_last4 = null;
@@ -153,10 +186,18 @@ export class ProfileService {
       throw new BadRequestError('UPI payouts require a UPI ID');
     }
 
+    const extra = firstBankEntry
+      ? {
+          account_hash: accountFingerprint(input.accountNumber),
+          bank_source: BankSource.CUSTOMER,
+          bank_verified_at: null,
+          bank_change_request_id: null,
+        }
+      : {};
     if (existing) {
-      await existing.update(next);
+      await existing.update({ ...next, ...extra });
     } else {
-      await UserPayoutDetail.create({ user_id: userId, ...next });
+      await UserPayoutDetail.create({ user_id: userId, ...next, ...extra });
     }
 
     await ActivityLogService.log({

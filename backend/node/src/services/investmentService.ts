@@ -53,6 +53,8 @@ import {
   istDayKey,
   istTimeOnDay,
   latestPayableDay,
+  monthlyCreditsForTerm,
+  monthlyDueDates,
 } from '../utils/workingDays.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -121,16 +123,26 @@ export function serializeInvestment(inv: Investment) {
     (inv.status === InvestmentStatus.ACTIVE || inv.status === InvestmentStatus.MATURED) && !isLocked;
 
   const isDaily = inv.payout_mode === ProfitPayoutMode.DAILY;
+  const isMonthly = inv.payout_mode === ProfitPayoutMode.MONTHLY;
   const amountPaise = toPaise(inv.amount);
   const perDayPaise = isDaily ? dailyProfitPaise(inv, amountPaise) : 0;
   const dailyProfit = fromPaise(perDayPaise);
   const weeklyProfit = isDaily ? fromPaise(weeklyProfitPaise(inv, amountPaise)) : 0;
-  const monthlyProfit = isDaily ? fromPaise(monthlyProfitPaise(inv, amountPaise)) : 0;
-  const profitDays = isDaily && start && maturity ? profitDaysForTerm(inv, start, maturity) : 0;
+  const monthlyProfit = isMonthly
+    ? fromPaise(percentOfPaise(amountPaise, inv.profit_value))
+    : isDaily
+    ? fromPaise(monthlyProfitPaise(inv, amountPaise))
+    : 0;
+  // DAILY: paying working days in the term; MONTHLY: number of monthly credits (365 days = 12)
+  const profitDays = isMonthly
+    ? monthlyCreditsForTerm(inv.duration_days)
+    : isDaily && start && maturity
+    ? profitDaysForTerm(inv, start, maturity)
+    : 0;
   const profitCredited = Number(inv.profit_credited) || 0;
   const creditsPerCycle = isDaily ? perCycleCap(inv) ?? null : null;
 
-  // Daily plans: which paying day are we on, and when does the next credit land?
+  // Daily & Monthly plans: which credit are we on, and when does the next credit land?
   let creditedDays = 0;
   let nextCreditAt: string | null = null;
   let nextCreditDue = false;
@@ -155,6 +167,21 @@ export function serializeInvestment(inv: Investment) {
     creditsThisCycle = payingDays
       .slice(0, Math.min(creditedDays, payingDays.length))
       .filter((d) => cycleNoForDay(startKey, d) === currentCycle).length;
+  } else if (isMonthly && start) {
+    const startKey = istDayKey(start);
+    const allMonths = monthlyDueDates(startKey, inv.duration_days, '9999-12-31');
+    const perMonthPaise = percentOfPaise(amountPaise, inv.profit_value);
+    const monthsCredited = perMonthPaise > 0 ? Math.round(toPaise(profitCredited) / perMonthPaise) : 0;
+    creditedDays = monthsCredited;
+    const stillPaying =
+      inv.status === InvestmentStatus.ACTIVE ||
+      inv.status === InvestmentStatus.MATURED ||
+      inv.status === InvestmentStatus.WITHDRAWAL_REQUESTED;
+    const nextMonth = allMonths[monthsCredited];
+    if (stillPaying && nextMonth) {
+      nextCreditAt = istTimeOnDay(nextMonth.dayKey, PAYOUT_HOUR_IST).toISOString();
+      nextCreditDue = nextMonth.dayKey <= latestPayableDay(new Date(now));
+    }
   }
 
   // The fee is charged only when the customer closes the investment before it finishes. A
@@ -297,6 +324,12 @@ export class InvestmentService {
         );
       }
     }
+    if (plan.payout_mode === ProfitPayoutMode.MONTHLY) {
+      const perMonthPaise = percentOfPaise(amountPaise, plan.profit_value);
+      if (perMonthPaise <= 0) {
+        throw new BadRequestError('The amount is too small to earn a monthly profit under this plan. Please invest more.');
+      }
+    }
 
     return {
       amountPaise,
@@ -326,6 +359,12 @@ export class InvestmentService {
     const result = this.calculate(plan, input.amount, now);
 
     const isDaily = plan.payout_mode === ProfitPayoutMode.DAILY;
+    const isMonthly = plan.payout_mode === ProfitPayoutMode.MONTHLY;
+    const monthlyProfitAmount = isMonthly
+      ? fromPaise(percentOfPaise(result.amountPaise, plan.profit_value))
+      : isDaily
+      ? fromPaise(monthlyProfitPaise(plan, result.amountPaise))
+      : 0;
     // Fee charged only if the customer closes the plan before it finishes
     const feePaise = capitalFeePaise(result.amountPaise, settings.capitalWithdrawalFeePercent);
 
@@ -342,12 +381,18 @@ export class InvestmentService {
       profitValue: plan.profit_value,
       payoutMode: plan.payout_mode,
       rateBasis: plan.rate_basis,
+      isDaily,
+      isMonthly,
       dailyRatePercent: isDaily ? dailyRatePercent(plan) : 0,
       dailyProfit: isDaily ? fromPaise(dailyProfitPaise(plan, result.amountPaise)) : 0,
       weeklyProfit: isDaily ? fromPaise(weeklyProfitPaise(plan, result.amountPaise)) : 0,
-      monthlyProfit: isDaily ? fromPaise(monthlyProfitPaise(plan, result.amountPaise)) : 0,
+      monthlyProfit: monthlyProfitAmount,
       creditsPerCycle: isDaily ? perCycleCap(plan) ?? null : null,
-      profitDays: isDaily && result.maturityDate ? profitDaysForTerm(plan, now, result.maturityDate) : 0,
+      profitDays: isMonthly
+        ? monthlyCreditsForTerm(plan.duration_days)
+        : isDaily && result.maturityDate
+        ? profitDaysForTerm(plan, now, result.maturityDate)
+        : 0,
       payoutHourIst: PAYOUT_HOUR_IST,
       expectedProfit: fromPaise(result.profitPaise),
       maturityAmount: fromPaise(result.maturityPaise),
@@ -540,6 +585,12 @@ export class InvestmentService {
                 ? ', for as long as your capital stays invested.'
                 : ` and ${formatInr(investment.expected_profit)} in total over ${serialized.profitDays} working days. Your capital returns to your capital wallet at maturity.`
             }`
+          : investment.payout_mode === ProfitPayoutMode.MONTHLY
+          ? `Your investment of ${formatInr(investment.amount)} in ${investment.plan_name} (${investment.reference}) is active. ${formatInr(
+              serialized.monthlyProfit
+            )} profit (${investment.profit_value}% of your capital) will be credited to your profit wallet every month on your start date at ${PAYOUT_HOUR_IST}:00 AM, ${formatInr(
+              investment.expected_profit
+            )} in total over ${serialized.profitDays} months. Your capital returns to your capital wallet at maturity.`
           : `Your investment of ${formatInr(investment.amount)} in ${investment.plan_name} (${investment.reference}) is active. Expected maturity amount: ${formatInr(
               investment.maturity_amount
             )}.`,
@@ -572,8 +623,9 @@ export class InvestmentService {
       const maturity = parseDbDate(inv.maturity_date);
       if (!maturity) continue;
 
-      // Pay the last profit days first (own transactions, idempotent)
+      // Pay the last profit days and the referrer's last daily commissions first (own transactions, idempotent)
       await DailyPayoutService.creditInvestmentUpTo(inv, istDayKey(maturity));
+      await DailyPayoutService.creditReferralCommissionUpTo(inv, istDayKey(maturity), { notify: true });
 
       const settled = await sequelize.transaction(async (t) => {
         const fresh = await Investment.findByPk(inv.id, { transaction: t, lock: t.LOCK.UPDATE });

@@ -68,6 +68,9 @@ export const config = {
     pass: process.env.SMTP_PASS || '',
     from: process.env.EMAIL_FROM || 'noreply@moontech.com',
   },
+
+  // Mailbox that receives new support chat messages from customers (empty = no email)
+  supportEmail: process.env.SUPPORT_EMAIL || process.env.EMAIL_FROM || '',
 };
 
 /**

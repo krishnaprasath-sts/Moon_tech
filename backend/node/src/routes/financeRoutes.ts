@@ -4,7 +4,7 @@ import { AdminFinanceController } from '../controllers/adminFinanceController.js
 import { authenticate } from '../middleware/authenticate.js';
 import { authorize } from '../middleware/authorize.js';
 import { validate } from '../middleware/validate.js';
-import { authRateLimiter } from '../middleware/rateLimiter.js';
+import { authRateLimiter, passwordResetRateLimiter } from '../middleware/rateLimiter.js';
 import { uploadReceipt, uploadPaymentProof, uploadUpiQr } from '../middleware/upload.js';
 import { UserRole } from '../types/index.js';
 import {
@@ -41,7 +41,7 @@ const customer = authorize(UserRole.CUSTOMER);
 // ---------------------------------------------------------------------------
 export const passwordRouter = Router();
 passwordRouter.post('/change-password', authenticate, validate(changePasswordSchema), FinanceController.changePassword);
-passwordRouter.post('/forgot-password', authRateLimiter, validate(forgotPasswordSchema), FinanceController.forgotPassword);
+passwordRouter.post('/forgot-password', authRateLimiter, passwordResetRateLimiter, validate(forgotPasswordSchema), FinanceController.forgotPassword);
 passwordRouter.post('/reset-password', authRateLimiter, validate(resetPasswordSchema), FinanceController.resetPassword);
 
 // ---------------------------------------------------------------------------
@@ -104,6 +104,8 @@ withdrawalRouter.get('/:id/proof', authenticate, customer, FinanceController.get
 // Files that must load without a login (used in <img> tags on the customer site)
 export const publicRouter = Router();
 publicRouter.get('/upi-qr/:file', FinanceController.getUpiQrImage);
+// Login / registration pages read this before anyone signs in
+publicRouter.get('/login-info', FinanceController.getLoginInfo);
 
 export const notificationRouter = Router();
 notificationRouter.get('/', authenticate, FinanceController.getNotifications);

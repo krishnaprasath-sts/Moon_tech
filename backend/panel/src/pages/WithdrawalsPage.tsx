@@ -7,6 +7,7 @@ import { TableStateRow } from '../components/TableStateRow';
 import { FinanceStatusBadge } from '../components/FinanceStatusBadge';
 import { WithdrawalDetailModal } from '../components/WithdrawalDetailModal';
 import { PageHeader } from '../components/PageHeader';
+import { BankFlagBadge } from '../components/BankCheck';
 import { RefreshButton } from '../components/RefreshButton';
 import { SearchInput } from '../components/SearchInput';
 import { DateRangeFilter } from '../components/DateRangeFilter';
@@ -203,7 +204,10 @@ export const WithdrawalsPage: React.FC = () => {
                         {formatINR(w.netAmount)}
                       </td>
                       <td className="py-3.5 px-4">
-                        <span className="font-bold text-slate-800 dark:text-slate-200">{w.payoutMethod}</span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="font-bold text-slate-800 dark:text-slate-200">{w.payoutMethod}</span>
+                          <BankFlagBadge flag={w.bankFlag} />
+                        </span>
                         <div className="text-[10px] font-mono text-slate-400 break-all">
                           {(w.payoutMethod === 'UPI' ? w.payoutUpiId : w.payoutAccountMasked) || '—'}
                         </div>

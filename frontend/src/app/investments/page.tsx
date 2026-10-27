@@ -261,7 +261,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function nextCreditLabel(investment: Investment): string | null {
-  if (investment.payoutMode !== 'DAILY' || !investment.nextCreditAt) return null;
+  if ((investment.payoutMode !== 'DAILY' && investment.payoutMode !== 'MONTHLY') || !investment.nextCreditAt) return null;
   if (investment.nextCreditDue) return 'Next credit is being processed now';
   const at = new Date(investment.nextCreditAt);
   const now = new Date();
@@ -282,7 +282,9 @@ function ProfitHistory({ token, investment }: { token: string; investment: Inves
   if (credits.length === 0) {
     return (
       <p className="text-[11px] text-zinc-500 py-2">
-        No profit credited yet. The first credit lands on the first working day after your investment starts, at {PAYOUT_TIME_LABEL}.
+        {investment.payoutMode === 'MONTHLY'
+          ? `No profit credited yet. Profit is credited monthly on your start date at ${PAYOUT_TIME_LABEL}.`
+          : `No profit credited yet. The first credit lands on the first working day after your investment starts, at ${PAYOUT_TIME_LABEL}.`}
       </p>
     );
   }
@@ -330,9 +332,10 @@ function InvestmentCard({ investment, onWithdraw, token }: { investment: Investm
   const openEnded = investment.isOpenEnded;
   const showProgress = investment.status !== 'CANCELLED' && !openEnded;
   const daily = investment.payoutMode === 'DAILY';
+  const monthly = investment.payoutMode === 'MONTHLY';
   const monthlyPlan = daily && investment.creditsPerCycle !== null;
   const creditedPct =
-    daily && investment.expectedProfit > 0
+    (daily || monthly) && investment.expectedProfit > 0
       ? Math.min(100, Math.round((investment.profitCredited / investment.expectedProfit) * 100))
       : 0;
   const cyclePct =
@@ -387,7 +390,7 @@ function InvestmentCard({ investment, onWithdraw, token }: { investment: Investm
         <Field label="Capital invested">
           <span className="tabular-nums font-semibold">{formatINR(investment.amount)}</span>
         </Field>
-        {daily ? (
+        {daily || monthly ? (
           <Field label="Profit per month">
             <span className="tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">+{formatINR(investment.monthlyProfit)}</span>
             <span className="text-zinc-500 font-normal">
@@ -401,7 +404,7 @@ function InvestmentCard({ investment, onWithdraw, token }: { investment: Investm
             <span className="text-zinc-500 font-normal"> ({formatProfit(investment.profitType, investment.profitValue, investment.payoutMode)})</span>
           </Field>
         )}
-        {daily ? (
+        {daily || monthly ? (
           <Field label="Profit credited so far">
             <span className="tabular-nums font-bold text-emerald-600 dark:text-emerald-400">+{formatINR(investment.profitCredited)}</span>
             {!openEnded && (
@@ -457,29 +460,39 @@ function InvestmentCard({ investment, onWithdraw, token }: { investment: Investm
         </div>
       )}
 
-      {daily && (
+      {(daily || monthly) && (
         <div className="rounded-xl bg-emerald-50/60 dark:bg-emerald-500/5 border border-emerald-100 dark:border-emerald-500/20 p-3 space-y-2">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="text-[11px] text-zinc-700 dark:text-zinc-300">
-              <span className="font-semibold text-emerald-700 dark:text-emerald-400">{formatINR(investment.dailyProfit)}</span>
-              {investment.dailyRatePercent > 0 && investment.rateBasis !== 'PER_DAY' ? ` (${investment.dailyRatePercent}% of capital)` : ''} every
-              working day (Mon–Fri) at {PAYOUT_TIME_LABEL}
-              {' · '}
-              <span className="font-semibold text-emerald-700 dark:text-emerald-400">{formatINR(investment.weeklyProfit)}</span> a week
-              {' · '}
-              {monthlyPlan && investment.creditsPerCycle ? (
+              {monthly ? (
                 <>
-                  <span className="tabular-nums">
-                    {investment.creditsThisCycle} of {investment.creditsPerCycle}
-                  </span>{' '}
-                  credits this month ({investment.creditedDays} in total)
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-400">{formatINR(investment.monthlyProfit)}</span> a month ({investment.profitValue}%), credited on your start date at {PAYOUT_TIME_LABEL}
+                  {' · '}
+                  <span className="tabular-nums">{investment.creditedDays} of {investment.profitDays}</span> months credited
                 </>
               ) : (
                 <>
-                  <span className="tabular-nums">
-                    {investment.creditedDays} of {investment.profitDays}
-                  </span>{' '}
-                  days credited
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-400">{formatINR(investment.dailyProfit)}</span>
+                  {investment.dailyRatePercent > 0 && investment.rateBasis !== 'PER_DAY' ? ` (${investment.dailyRatePercent}% of capital)` : ''} every
+                  working day (Mon–Fri) at {PAYOUT_TIME_LABEL}
+                  {' · '}
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-400">{formatINR(investment.weeklyProfit)}</span> a week
+                  {' · '}
+                  {monthlyPlan && investment.creditsPerCycle ? (
+                    <>
+                      <span className="tabular-nums">
+                        {investment.creditsThisCycle} of {investment.creditsPerCycle}
+                      </span>{' '}
+                      credits this month ({investment.creditedDays} in total)
+                    </>
+                  ) : (
+                    <>
+                      <span className="tabular-nums">
+                        {investment.creditedDays} of {investment.profitDays}
+                      </span>{' '}
+                      days credited
+                    </>
+                  )}
                 </>
               )}
               {investment.status === 'ACTIVE' && !openEnded && <> · capital of {formatINR(investment.amount)} returns at maturity</>}
@@ -504,12 +517,12 @@ function InvestmentCard({ investment, onWithdraw, token }: { investment: Investm
           <div
             className="h-1 rounded-full bg-white dark:bg-white/[0.06] overflow-hidden"
             role="progressbar"
-            aria-valuenow={monthlyPlan ? cyclePct : creditedPct}
+            aria-valuenow={monthly ? creditedPct : monthlyPlan ? cyclePct : creditedPct}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-label={monthlyPlan ? 'Profit credits this month' : 'Profit credited so far'}
+            aria-label={monthly ? 'Profit credited so far' : monthlyPlan ? 'Profit credits this month' : 'Profit credited so far'}
           >
-            <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${monthlyPlan ? cyclePct : creditedPct}%` }} />
+            <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${monthly ? creditedPct : monthlyPlan ? cyclePct : creditedPct}%` }} />
           </div>
           {showHistory && <ProfitHistory token={token} investment={investment} />}
         </div>
@@ -518,8 +531,8 @@ function InvestmentCard({ investment, onWithdraw, token }: { investment: Investm
         <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
           Matured on {formatDate(investment.maturedAt || investment.maturityDate)}.
           {investment.canRequestWithdrawal
-            ? daily
-              ? ' Your daily profit is already in your profit wallet; withdraw your capital now, no fee.'
+            ? daily || monthly
+              ? ' Your profit is already in your profit wallet; withdraw your capital now, no fee.'
               : ' You can request your withdrawal now.'
             : ''}
         </p>
@@ -888,7 +901,7 @@ function WithdrawModal({
           )}
 
           <p className="text-[11px] text-zinc-500 leading-relaxed">
-            By confirming, you ask MoonTech to pay {formatINR(net)} to the payout details shown. The request cannot be
+            By confirming, you ask Clyvus Ventures to pay {formatINR(net)} to the payout details shown. The request cannot be
             edited once submitted; an admin reviews it before payment.
           </p>
 

@@ -43,6 +43,28 @@
   animation: fadeIn 0.15s ease-out forwards;
 }
 
+/* Pop-up windows: the backdrop fades in, the window springs up softly (ModalShell) */
+@keyframes backdropIn {
+  from {
+    opacity: 0;
+  }
+}
+
+.animate-backdropIn {
+  animation: backdropIn 0.2s ease-out both;
+}
+
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+}
+
+.animate-modalIn {
+  animation: modalIn 0.32s cubic-bezier(0.22, 1.2, 0.36, 1) both;
+}
+
 @keyframes slideInRight {
   from {
     opacity: 0;
@@ -69,6 +91,92 @@
 
 .animate-toastProgress {
   animation: toastProgress 4.5s linear forwards;
+}
+
+/* ---- Page changes (sidebar links use React Router's viewTransition) ----
+   The old page cross-fades into the new one, so there is never a blank frame.
+   Sidebar and top bar have their own names, so they stay still while only the page area changes. */
+.vt-sidebar {
+  view-transition-name: panel-sidebar;
+}
+
+.vt-header {
+  view-transition-name: panel-header;
+}
+
+::view-transition-old(root) {
+  animation: 140ms cubic-bezier(0.4, 0, 1, 1) both vt-fade-out;
+}
+
+::view-transition-new(root) {
+  animation: 240ms cubic-bezier(0, 0, 0.2, 1) 30ms both vt-fade-in;
+}
+
+@keyframes vt-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes vt-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* The sidebar's old and new pictures differ only in the highlighted item: swap them quickly */
+::view-transition-old(panel-sidebar),
+::view-transition-new(panel-sidebar),
+::view-transition-old(panel-header),
+::view-transition-new(panel-header) {
+  animation-duration: 120ms;
+}
+
+/* ---- Theme switch, modern browsers: the new theme is revealed as a circle (see ThemeContext) ---- */
+html.theme-reveal::view-transition-old(root),
+html.theme-reveal::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+html.theme-reveal::view-transition-new(root) {
+  z-index: 2;
+}
+
+/* During the theme circle the whole screen is one picture, so named parts must not split off */
+html.theme-reveal .vt-sidebar,
+html.theme-reveal .vt-header {
+  view-transition-name: none;
+}
+
+/* While the circle grows, colours switch at once inside it (no half-faded mix) */
+html.theme-reveal *,
+html.theme-reveal *::before,
+html.theme-reveal *::after {
+  transition: none !important;
+}
+
+/* Theme switch, other browsers: every colour fades for a moment */
+html.theme-fade,
+html.theme-fade *,
+html.theme-fade *::before,
+html.theme-fade *::after {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow !important;
+  transition-duration: 350ms !important;
+  transition-timing-function: ease !important;
+  transition-delay: 0ms !important;
+}
+
+/* People who ask their device for less motion get instant changes */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Global Interactive Mouse Hover Cursor */

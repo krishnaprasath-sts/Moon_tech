@@ -67,14 +67,18 @@ export default function ReferralsPage() {
 
   const data = referrals.data;
   const link = data ? shareUrl(data.referralCode) : '';
+  // Recurring commission: per working day, and per month (20 paying days a month, like daily profit)
+  const dailyPct = data?.dailyCommissionPercent ?? 0;
+  const monthlyPct = Math.round(dailyPct * 20 * 10000) / 10000;
+  const hasDaily = dailyPct > 0;
   const shareText = data
-    ? `Join me on Moon Tech Solutions and start earning daily profit on your investments. Use my referral code ${data.referralCode} when you sign up: ${link}`
+    ? `Join me on Clyvus Ventures and start earning daily profit on your investments. Use my referral code ${data.referralCode} when you sign up: ${link}`
     : '';
 
   const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
   const nativeShare = () => {
     if (!canNativeShare || !data) return;
-    navigator.share({ title: 'Moon Tech Solutions', text: shareText, url: link }).catch(() => undefined);
+    navigator.share({ title: 'Clyvus Ventures', text: shareText, url: link }).catch(() => undefined);
   };
 
   return (
@@ -83,7 +87,9 @@ export default function ReferralsPage() {
         title="Referrals"
         subtitle={
           data
-            ? `Earn ${data.commissionPercent}% of every amount invested by people you refer, credited to your profit wallet instantly when they invest.`
+            ? hasDaily
+              ? `Earn ${data.commissionPercent}% instantly on every amount people you refer invest, plus ${dailyPct}% of it every working day (${monthlyPct}% a month) while their investment runs, all credited to your profit wallet.`
+              : `Earn ${data.commissionPercent}% of every amount invested by people you refer, credited to your profit wallet instantly when they invest.`
             : 'Invite friends and earn a commission on every investment they make.'
         }
         actions={
@@ -127,8 +133,15 @@ export default function ReferralsPage() {
                 </div>
                 <p className="mt-3 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
                   Friends enter this code while registering, or simply open your link below and it is filled in for them.
-                  You earn <strong className="text-zinc-900 dark:text-white">{data.commissionPercent}%</strong> of each investment they make,
-                  paid into your wallet along with your daily profit.
+                  You earn an instant <strong className="text-zinc-900 dark:text-white">{data.commissionPercent}%</strong> commission on each investment they make
+                  {hasDaily ? (
+                    <>
+                      , plus <strong className="text-zinc-900 dark:text-white">{dailyPct}% every working day ({monthlyPct}% a month)</strong> while their
+                      investment is active, paid into your profit wallet at {PAYOUT_TIME_LABEL}.
+                    </>
+                  ) : (
+                    ', paid into your profit wallet.'
+                  )}
                 </p>
                 <div className="mt-4 flex flex-col sm:flex-row gap-2">
                   <div className="flex-1 min-w-0 flex items-center gap-2 rounded-lg border border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-black/20 px-3 py-2">
@@ -177,7 +190,11 @@ export default function ReferralsPage() {
                       : 'Nothing waiting'
                   }
                 />
-                <Stat label="Your rate" value={`${data.commissionPercent}%`} hint="Of each referred investment" />
+                <Stat
+                  label="Your rate"
+                  value={hasDaily ? `${data.commissionPercent}% + ${monthlyPct}%/mo` : `${data.commissionPercent}%`}
+                  hint={hasDaily ? `Instant ${data.commissionPercent}% + ${dailyPct}% every working day` : 'Of each referred investment'}
+                />
               </div>
             </div>
           </section>
@@ -189,7 +206,11 @@ export default function ReferralsPage() {
             <Step
               n={3}
               title="You get paid"
-              text={`${data.commissionPercent}% of their investment lands in your profit wallet the moment they invest.`}
+              text={
+                hasDaily
+                  ? `${data.commissionPercent}% of their investment lands in your profit wallet the moment they invest, then ${dailyPct}% of it every working day (${monthlyPct}% a month) while it runs.`
+                  : `${data.commissionPercent}% of their investment lands in your profit wallet the moment they invest.`
+              }
             />
           </section>
 

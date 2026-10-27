@@ -356,6 +356,17 @@ export class AdminFinanceController {
       return;
     }
 
+    if (format === 'pdf') {
+      const pdf = await ReportService.toPdf(report);
+      const fileName = `${report.type}_report_${new Date().toISOString().slice(0, 10)}.pdf`;
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.setHeader('Content-Length', String(pdf.length));
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.status(200).end(pdf);
+      return;
+    }
+
     sendResponse({ res, message: `${report.title} generated successfully`, data: report });
   });
 }

@@ -6,58 +6,59 @@ const PROGRAMS = [
   {
     icon: BookOpen,
     level: 'Beginner',
-    title: 'Stock Market Foundations',
-    desc: 'How the Indian stock market works: NSE and BSE, demat and trading accounts, order types, indices, reading a quote and the basics of risk.',
-    topics: ['Market structure', 'Demat & orders', 'Indices & sectors', 'Risk basics'],
+    title: 'Stock Market Basics',
+    desc: 'Start from zero. Learn what a share is, how to open a demat account and how to buy and sell shares.',
+    topics: ['What is a share', 'Demat account', 'Buying & selling', 'Nifty & Sensex'],
   },
   {
     icon: CandlestickChart,
     level: 'Intermediate',
-    title: 'Technical Analysis',
-    desc: 'Read charts with confidence: candlesticks, support and resistance, trends, moving averages, RSI and MACD, chart patterns, entries and exits.',
-    topics: ['Candlesticks', 'Trends & levels', 'Indicators', 'Entries & exits'],
+    title: 'Chart Reading',
+    desc: 'Learn to read stock charts. See if a price is rising or falling and decide when to buy and when to sell.',
+    topics: ['Price charts', 'Up & down trends', 'When to buy', 'When to sell'],
   },
   {
     icon: Layers,
     level: 'Advanced',
-    title: 'Options & Derivatives',
-    desc: 'Futures and options explained in plain language: how contracts work, the Greeks, hedging, popular option strategies, margin and position risk.',
-    topics: ['Futures & options', 'Greeks simplified', 'Strategies', 'Hedging & margin'],
+    title: 'Futures & Options',
+    desc: 'Futures and options (F&O) explained in simple words, with examples. Learn how they work and the risks.',
+    topics: ['What is F&O', 'Simple examples', 'Common strategies', 'Risks'],
   },
   {
     icon: Users,
     level: 'Mentorship',
-    title: 'Live Trading Mentorship',
-    desc: 'Trade the live market with a mentor beside you: market-open sessions, trade planning, journaling and review, position sizing and trading psychology.',
-    topics: ['Market-open sessions', 'Trade planning', 'Journal review', 'Psychology'],
+    title: 'Live Trading with a Mentor',
+    desc: 'Practise in the real market with a mentor guiding you. Plan each trade, learn from mistakes and stay calm.',
+    topics: ['Live market', 'Trade planning', 'Learn from mistakes', 'Control emotions'],
   },
 ];
 
 export const ProgramsSection: React.FC = () => {
   return (
     <section id="programs" className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 scroll-mt-16">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-10 pb-4 border-b border-zinc-200 dark:border-white/[0.06]">
+      <div data-reveal className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-10 pb-4 border-b border-zinc-200 dark:border-white/[0.06]">
         <div>
           <h2 className="text-2xl sm:text-3xl font-bold text-zinc-950 dark:text-white tracking-tight mb-1">
-            Training programs
+            Our courses
           </h2>
           <p className="text-zinc-600 dark:text-zinc-400 text-xs sm:text-sm">
-            Four tracks that take you from your first demat account to trading the live market with a plan.
+            Four courses. Start with the basics, or pick the one you need.
           </p>
         </div>
         <Link
           href="/register"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+          className="group/cta inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline"
         >
-          Join a program <ArrowRight className="w-3 h-3" />
+          Join a course <ArrowRight className="w-3 h-3 transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover/cta:translate-x-1" />
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div data-reveal-group className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {PROGRAMS.map((program) => {
           const Icon = program.icon;
           return (
             <article
+              data-reveal
               key={program.title}
               className="group p-6 rounded-2xl bg-white dark:bg-zinc-900/30 border border-zinc-200 dark:border-white/[0.07] hover:border-blue-500/30 dark:hover:border-blue-400/30 hover:-translate-y-1 hover:shadow-xl shadow-xs transition-all duration-300"
             >
@@ -89,8 +90,7 @@ export const ProgramsSection: React.FC = () => {
       </div>
 
       <p className="text-[11px] text-zinc-500 mt-6 leading-relaxed">
-        Batch dates, timings and fees are shared with you after you create an account. Programs can be taken one after
-        the other or picked individually.
+        Classes are held in the evenings and on weekends. You can see dates, timings and fees after you sign up.
       </p>
     </section>
   );

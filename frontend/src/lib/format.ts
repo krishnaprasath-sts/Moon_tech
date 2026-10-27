@@ -79,6 +79,7 @@ export function formatProfit(
 ): string {
   if (profitType === 'FIXED') return `${formatINRShort(profitValue)} fixed`;
   const pct = `${Number(profitValue).toLocaleString('en-IN', { maximumFractionDigits: 2 })}%`;
+  if (payoutMode === 'MONTHLY') return `${pct} / month`;
   if (payoutMode !== 'DAILY') return pct;
   if (rateBasis === 'PER_MONTH') return `${pct} / month`;
   if (rateBasis === 'PER_YEAR') return `${pct} / year`;
@@ -117,6 +118,10 @@ export function isDailyPlan(plan: Pick<InvestmentPlan, 'payoutMode'>): boolean {
   return plan.payoutMode === 'DAILY';
 }
 
+export function isMonthlyPlan(plan: Pick<InvestmentPlan, 'payoutMode'>): boolean {
+  return plan.payoutMode === 'MONTHLY';
+}
+
 export function isOpenEndedPlan(plan: Pick<InvestmentPlan, 'durationDays'>): boolean {
   return Number(plan.durationDays) === 0;
 }
@@ -137,6 +142,9 @@ export function formatDailyRate(plan: RateTerms): string {
 
 /** Short caption under the headline rate on a plan card */
 export function profitCaption(plan: Pick<InvestmentPlan, 'profitType' | 'payoutMode' | 'profitValue'> & { rateBasis?: RateBasis | null }): string {
+  if (isMonthlyPlan(plan)) {
+    return `credited monthly on your start date at ${PAYOUT_TIME_LABEL}`;
+  }
   if (isDailyPlan(plan)) {
     return plan.rateBasis && plan.rateBasis !== 'PER_DAY'
       ? `= ${formatDailyRate(plan)}, credited at ${PAYOUT_TIME_LABEL}`
@@ -147,6 +155,9 @@ export function profitCaption(plan: Pick<InvestmentPlan, 'profitType' | 'payoutM
 
 /** How and when the customer receives money under this plan */
 export function payoutDescription(plan: Pick<InvestmentPlan, 'payoutMode' | 'durationDays'>): string {
+  if (isMonthlyPlan(plan)) {
+    return `Profit credited monthly on your start date · capital back at maturity`;
+  }
   if (isDailyPlan(plan)) {
     return isOpenEndedPlan(plan)
       ? `Profit daily (Mon–Fri, ${PAYOUT_TIME_LABEL}) · capital returned when you close the plan`
@@ -228,6 +239,9 @@ export function weeklyProfitFor(plan: RateTerms, amount: number): number {
 }
 
 export function monthlyProfitFor(plan: RateTerms, amount: number): number {
+  if (isMonthlyPlan(plan)) {
+    return Math.round(amount * (Number(plan.profitValue) || 0)) / 100;
+  }
   return Math.round(dailyProfitFor(plan, amount) * CREDITS_PER_MONTH * 100) / 100;
 }
 
@@ -248,6 +262,13 @@ export function formatDuration(days: number): string {
  */
 export function estimateProfit(plan: PlanTerms, amount: number, start: Date = new Date()): number {
   if (!Number.isFinite(amount) || amount <= 0) return 0;
+  if (isMonthlyPlan(plan)) {
+    // Same as the server: one credit per whole 30-day month of the term (365 days = 12), at least one
+    const days = Math.floor(Number(plan.durationDays) || 0);
+    const months = days <= 0 ? 12 : Math.max(1, Math.floor(days / 30));
+    const monthlyPaise = Math.round(amount * (Number(plan.profitValue) || 0));
+    return Math.round(monthlyPaise * months) / 100;
+  }
   if (isDailyPlan(plan)) {
     if (isOpenEndedPlan(plan)) return 0;
     return Math.round(dailyProfitFor(plan, amount) * countPayingDays(plan, start, plan.durationDays) * 100) / 100;

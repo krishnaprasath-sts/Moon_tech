@@ -362,13 +362,18 @@ export const InvestmentPlanModal: React.FC<InvestmentPlanModalProps> = ({ plan, 
           <p className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
             Profit payout <span className="text-rose-500">*</span>
           </p>
-          <div role="radiogroup" aria-label="Profit payout" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div role="radiogroup" aria-label="Profit payout" className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {(
               [
                 {
                   mode: 'DAILY' as ProfitPayoutMode,
                   title: 'Daily (working days)',
-                  text: 'The monthly (or yearly) rate on the capital is split into equal credits paid to the profit wallet every Monday-Friday at 6:00 AM IST.',
+                  text: 'Split into equal credits paid to the profit wallet every Monday-Friday at 6:00 AM IST.',
+                },
+                {
+                  mode: 'MONTHLY' as ProfitPayoutMode,
+                  title: 'Monthly (anniversary date)',
+                  text: 'Credited once every month on the start date anniversary at 6:00 AM IST. Capital back at maturity.',
                 },
                 {
                   mode: 'AT_MATURITY' as ProfitPayoutMode,
@@ -384,7 +389,7 @@ export const InvestmentPlanModal: React.FC<InvestmentPlanModalProps> = ({ plan, 
                 aria-checked={payoutMode === option.mode}
                 onClick={() => {
                   setPayoutMode(option.mode);
-                  if (option.mode === 'DAILY') setProfitType('PERCENTAGE');
+                  if (option.mode === 'DAILY' || option.mode === 'MONTHLY') setProfitType('PERCENTAGE');
                 }}
                 className={`text-left p-3 rounded-2xl border transition ${
                   payoutMode === option.mode

@@ -4,53 +4,54 @@ import { BookOpen, Brain, Headset, MonitorPlay, NotebookPen, ShieldCheck } from 
 const FEATURES = [
   {
     icon: BookOpen,
-    title: 'Structured curriculum',
-    desc: 'Each program follows a clear path, from the basics to advanced concepts, so nothing important is skipped.',
+    title: 'Step-by-step lessons',
+    desc: 'Lessons go from easy to advanced, in the right order. Nothing important is skipped.',
   },
   {
     icon: MonitorPlay,
-    title: 'Live market sessions',
-    desc: 'Learn on real charts while the market is open, not only from slides. See how setups form and play out.',
+    title: 'Learn on the real market',
+    desc: 'Classes use the real market while it is open, not just slides.',
   },
   {
     icon: Headset,
-    title: 'Mentor support',
-    desc: 'Ask questions, get your trade plans reviewed and clear doubts with an experienced mentor.',
+    title: 'Your own mentor',
+    desc: 'Ask questions any time. Your mentor clears your doubts and checks your trades.',
   },
   {
     icon: ShieldCheck,
-    title: 'Risk management first',
-    desc: 'Position sizing, stop losses and capital protection are taught before any strategy.',
+    title: 'Safety first',
+    desc: 'Before anything else, you learn how to protect your money and limit losses.',
   },
   {
     icon: NotebookPen,
-    title: 'Journals and reviews',
-    desc: 'Keep a trading journal and review it regularly so every trade, good or bad, teaches you something.',
+    title: 'Learn from every trade',
+    desc: 'Write down each trade and review it with your mentor, so you keep getting better.',
   },
   {
     icon: Brain,
-    title: 'Trading psychology',
-    desc: 'Build the discipline to follow your plan, handle losses calmly and avoid impulsive decisions.',
+    title: 'Stay calm and patient',
+    desc: 'Learn to control fear and greed and stick to your plan, even after a loss.',
   },
 ];
 
 export const FeaturesSection: React.FC = () => {
   return (
     <section id="why-us" className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 transition-colors duration-200 scroll-mt-16">
-      <div className="text-center max-w-xl mx-auto mb-14">
+      <div data-reveal className="text-center max-w-xl mx-auto mb-14">
         <h2 className="text-2xl sm:text-3xl font-bold text-zinc-950 dark:text-white tracking-tight">
-          Why learn with MoonTech
+          Why learn with Clyvus Ventures
         </h2>
         <p className="text-zinc-600 dark:text-zinc-400 text-xs sm:text-sm mt-2">
-          Practical training built around how the market actually behaves, with support until you are confident.
+          Simple, practical training with support until you can trade on your own.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+      <div data-reveal-group className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {FEATURES.map((f) => {
           const Icon = f.icon;
           return (
             <div
+              data-reveal
               key={f.title}
               className="group p-6 rounded-2xl bg-white dark:bg-zinc-900/30 border border-zinc-200 dark:border-white/[0.07] hover:border-blue-500/30 dark:hover:border-blue-400/30 hover:-translate-y-1.5 hover:shadow-xl shadow-xs transition-all duration-300 cursor-default"
             >

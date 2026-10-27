@@ -196,7 +196,10 @@ export const CustomersPage: React.FC = () => {
                   const isActive = customer.accountStatus === UserStatus.ACTIVE;
                   return (
                     <tr key={customer.id} className={trClass}>
-                      <td className="py-3.5 px-4 font-mono font-semibold text-slate-600 dark:text-slate-300">#{customer.id}</td>
+                      <td className="py-3.5 px-4 font-mono font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                        <div>{customer.customerId || `#${customer.id}`}</div>
+                        {customer.customerId && <div className="text-[10px] font-normal text-slate-400">#{customer.id}</div>}
+                      </td>
                       <td className="py-3.5 px-4 min-w-[160px]">
                         <div className="font-bold text-slate-900 dark:text-white">{customer.fullName || 'Customer'}</div>
                         <div className="text-[11px] text-slate-500 dark:text-slate-400">

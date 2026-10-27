@@ -2,7 +2,6 @@ import React from 'react';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { EarningCalculator } from '@/components/calculator/EarningCalculator';
-import { FloatingSupport } from '@/components/layout/FloatingSupport';
 import { RequireAuth } from '@/components/layout/RequireAuth';
 
 export default function CalculatorPage() {
@@ -25,8 +24,6 @@ function CalculatorContent() {
           <EarningCalculator />
         </div>
       </main>
-
-      <FloatingSupport />
       <Footer />
     </div>
   );

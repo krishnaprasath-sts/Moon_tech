@@ -418,10 +418,11 @@ export const useCreateAnnouncement = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { title: string; message: string }) => {
+    mutationFn: async (data: { title: string; message: string; showOnLoginPage?: boolean }) => {
       return await financeApi.createAnnouncement(data);
     },
-    onSuccess: () => invalidateKeys(queryClient, ['announcements', 'activity-logs']),
+    // The pushed announcement also becomes the login-page popup (a platform setting)
+    onSuccess: () => invalidateKeys(queryClient, ['announcements', 'activity-logs', 'platform-settings']),
   });
 };
 

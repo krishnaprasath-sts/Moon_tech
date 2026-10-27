@@ -10,6 +10,7 @@ import {
   CustomerProfile,
   ProfitCredit,
   ReferralCommission,
+  ReferralDailyCredit,
 } from '../models/index.js';
 import {
   WalletTxnType,
@@ -191,33 +192,43 @@ export class WalletService {
    * Wallet + portfolio summary for a customer
    */
   public static async getSummary(userId: number) {
-    const [balances, pendingDeposits, deposits, investments, withdrawals, profitCredits, commissions, profitLedger] =
-      await Promise.all([
-        this.getBalances(userId),
-        Deposit.findAll({
-          where: { user_id: userId, status: DepositStatus.PENDING },
-          attributes: ['amount'],
-        }),
-        Deposit.findAll({
-          where: { user_id: userId, status: DepositStatus.APPROVED },
-          attributes: ['amount'],
-        }),
-        Investment.findAll({
-          where: { user_id: userId },
-          attributes: ['amount', 'expected_profit', 'profit_credited', 'status'],
-        }),
-        Withdrawal.findAll({
-          where: { user_id: userId },
-          attributes: ['total_amount', 'profit_amount', 'fee_amount', 'net_amount', 'status', 'source', 'bucket'],
-        }),
-        ProfitCredit.findAll({ where: { user_id: userId }, attributes: ['amount', 'credit_day'] }),
-        ReferralCommission.findAll({ where: { referrer_user_id: userId }, attributes: ['amount', 'status'] }),
-        // Every profit credit that reached the wallet: daily credits and profit paid at maturity
-        WalletTransaction.findAll({
-          where: { user_id: userId, type: WalletTxnType.PROFIT, direction: WalletTxnDirection.CREDIT },
-          attributes: ['amount'],
-        }),
-      ]);
+    const [
+      balances,
+      pendingDeposits,
+      deposits,
+      investments,
+      withdrawals,
+      profitCredits,
+      commissions,
+      dailyReferralCredits,
+      profitLedger,
+    ] = await Promise.all([
+      this.getBalances(userId),
+      Deposit.findAll({
+        where: { user_id: userId, status: DepositStatus.PENDING },
+        attributes: ['amount'],
+      }),
+      Deposit.findAll({
+        where: { user_id: userId, status: DepositStatus.APPROVED },
+        attributes: ['amount'],
+      }),
+      Investment.findAll({
+        where: { user_id: userId },
+        attributes: ['amount', 'expected_profit', 'profit_credited', 'status'],
+      }),
+      Withdrawal.findAll({
+        where: { user_id: userId },
+        attributes: ['total_amount', 'profit_amount', 'fee_amount', 'net_amount', 'status', 'source', 'bucket'],
+      }),
+      ProfitCredit.findAll({ where: { user_id: userId }, attributes: ['amount', 'credit_day'] }),
+      ReferralCommission.findAll({ where: { referrer_user_id: userId }, attributes: ['amount', 'status'] }),
+      ReferralDailyCredit.findAll({ where: { referrer_user_id: userId }, attributes: ['amount'] }),
+      // Every profit credit that reached the wallet: daily credits and profit paid at maturity
+      WalletTransaction.findAll({
+        where: { user_id: userId, type: WalletTxnType.PROFIT, direction: WalletTxnDirection.CREDIT },
+        attributes: ['amount'],
+      }),
+    ]);
 
     const sum = (values: number[]) => values.reduce((acc, v) => acc + v, 0);
 
@@ -232,6 +243,7 @@ export class WalletService {
     const latestCreditDay = profitCredits.map((c) => String(c.credit_day)).sort().pop() ?? null;
     const creditedCommissions = commissions.filter((c) => c.status === ReferralCommissionStatus.CREDITED);
     const pendingCommissions = commissions.filter((c) => c.status === ReferralCommissionStatus.PENDING);
+    const dailyReferralPaise = sum(dailyReferralCredits.map((c: any) => toPaise(c.amount)));
 
     const todayKey = istDayKey(new Date());
     const monthPrefix = todayKey.slice(0, 7);
@@ -256,7 +268,7 @@ export class WalletService {
         sum(profitCredits.filter((c) => String(c.credit_day).startsWith(monthPrefix)).map((c) => toPaise(c.amount)))
       ),
       lastProfitCreditDay: latestCreditDay,
-      referralEarnings: fromPaise(sum(creditedCommissions.map((c) => toPaise(c.amount)))),
+      referralEarnings: fromPaise(sum(creditedCommissions.map((c) => toPaise(c.amount))) + dailyReferralPaise),
       referralEarningsPending: fromPaise(sum(pendingCommissions.map((c) => toPaise(c.amount)))),
       totalWithdrawn: fromPaise(sum(completedWithdrawals.map((w) => toPaise(w.net_amount)))),
       totalFeesPaid: fromPaise(sum(completedWithdrawals.map((w) => toPaise(w.fee_amount)))),

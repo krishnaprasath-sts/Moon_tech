@@ -236,7 +236,7 @@ const BADGE_STYLES: Record<string, string> = {
   NOT_AVAILABLE: BADGE_ZINC,
 };
 
-export type BadgeKind = 'deposit' | 'investment' | 'withdrawal' | 'transaction' | 'kyc';
+export type BadgeKind = 'deposit' | 'investment' | 'withdrawal' | 'transaction' | 'kyc' | 'bankChange';
 
 /** Per-domain overrides: the same status word can mean different things. */
 const KIND_STYLES: Partial<Record<BadgeKind, Record<string, string>>> = {
@@ -244,12 +244,15 @@ const KIND_STYLES: Partial<Record<BadgeKind, Record<string, string>>> = {
   deposit: { APPROVED: BADGE_GREEN },
   // An approved withdrawal is still waiting for the payout to be made.
   withdrawal: { APPROVED: BADGE_BLUE },
+  // An approved bank change is final: withdrawals now go to the new account.
+  bankChange: { APPROVED: BADGE_GREEN },
 };
 
 const KIND_LABELS: Partial<Record<BadgeKind, Record<string, string>>> = {
   deposit: { PENDING: 'Pending verification', APPROVED: 'Approved', REJECTED: 'Rejected' },
   withdrawal: { PENDING: 'Requested', APPROVED: 'Approved', COMPLETED: 'Paid', REJECTED: 'Rejected' },
   investment: { WITHDRAWAL_REQUESTED: 'Withdrawal requested' },
+  bankChange: { PENDING: 'Waiting for approval', APPROVED: 'Approved', REJECTED: 'Rejected', CANCELLED: 'Cancelled' },
   kyc: { DRAFT: 'Not submitted', PENDING: 'Under review', UNDER_REVIEW: 'Under review', RESUBMISSION_REQUIRED: 'Resubmission required' },
 };
 

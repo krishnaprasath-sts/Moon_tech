@@ -54,7 +54,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
       {/* Backdrop */}
-      <div onClick={handleBackdropClick} className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity" />
+      <div onClick={handleBackdropClick} className="fixed inset-0 bg-black/80 backdrop-blur-sm animate-backdropIn" />
 
       <div
         ref={panelRef}
@@ -62,7 +62,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`relative w-full ${maxWidthClass} bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-h-[calc(100vh-1.5rem)] sm:max-h-[92vh] flex flex-col shadow-2xl overflow-hidden z-10 my-auto animate-fadeIn focus:outline-none`}
+        className={`relative w-full ${maxWidthClass} bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-h-[calc(100vh-1.5rem)] sm:max-h-[92vh] flex flex-col shadow-2xl overflow-hidden z-10 my-auto animate-modalIn focus:outline-none`}
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/90 flex-shrink-0">

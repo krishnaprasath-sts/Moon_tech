@@ -16,6 +16,10 @@ export interface KycProfileAttributes {
   bank_account_last4?: string | null;
   account_holder_name?: string | null;
   ifsc_code?: string | null;
+  bank_branch?: string | null;
+  bank_name?: string | null;
+  /** Keyed fingerprint of the account number, to compare accounts without decrypting */
+  bank_account_hash?: string | null;
   passbook_document?: string | null;
   pan_document?: string | null;
   aadhaar_document?: string | null;
@@ -43,6 +47,8 @@ export interface KycProfileCreationAttributes
     | 'bank_account_last4'
     | 'account_holder_name'
     | 'ifsc_code'
+    | 'bank_name'
+    | 'bank_account_hash'
     | 'passbook_document'
     | 'pan_document'
     | 'aadhaar_document'
@@ -71,6 +77,9 @@ export class KycProfile
   declare public bank_account_last4: string | null;
   declare public account_holder_name: string | null;
   declare public ifsc_code: string | null;
+  declare public bank_branch: string | null;
+  declare public bank_name: string | null;
+  declare public bank_account_hash: string | null;
   declare public passbook_document: string | null;
   declare public pan_document: string | null;
   declare public aadhaar_document: string | null;
@@ -138,6 +147,18 @@ KycProfile.init(
     },
     ifsc_code: {
       type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    bank_branch: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+    bank_name: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+    bank_account_hash: {
+      type: DataTypes.STRING(64),
       allowNull: true,
     },
     passbook_document: {

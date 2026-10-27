@@ -20,7 +20,9 @@ import { btnPrimaryClass, tableCardClass, theadClass, tbodyClass, trClass, numCe
 import { formatINR, formatNumber, getApiErrorMessage } from '../utils/finance';
 
 const formatProfit = (plan: InvestmentPlan) =>
-  plan.payoutMode === 'DAILY'
+  plan.payoutMode === 'MONTHLY'
+    ? `${plan.profitValue}% / month (anniversary)`
+    : plan.payoutMode === 'DAILY'
     ? plan.rateBasis === 'PER_MONTH'
       ? `${plan.profitValue}% / month = ${plan.dailyRatePercent}% / day`
       : plan.rateBasis === 'PER_YEAR'

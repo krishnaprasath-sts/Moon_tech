@@ -51,6 +51,7 @@ export class FinanceController {
           bankAccountNumber: settings.bankAccountNumber,
           bankIfsc: settings.bankIfsc,
           bankName: settings.bankName,
+          bankBranch: settings.bankBranch,
           bankTransferInstructions: settings.bankTransferInstructions,
           requireKycForInvestment: settings.requireKycForInvestment,
           requireKycForWithdrawal: settings.requireKycForWithdrawal,
@@ -101,6 +102,13 @@ export class FinanceController {
   });
 
   /** Public: the admin-uploaded UPI QR image. The file name doubles as the access key. */
+  /** Public: maintenance state and announcement for the customer login / registration pages */
+  public static getLoginInfo = asyncHandler(async (_req, res) => {
+    const info = await SettingsService.getLoginInfo();
+    res.setHeader('Cache-Control', 'no-store');
+    sendResponse({ res, message: 'Login page information retrieved successfully', data: info });
+  });
+
   public static getUpiQrImage = asyncHandler(async (req, res) => {
     const settings = await SettingsService.getSettings();
     const requested = String(req.params.file || '');

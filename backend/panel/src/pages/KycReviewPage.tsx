@@ -432,6 +432,20 @@ export const KycReviewPage: React.FC = () => {
               </div>
             </div>
 
+            <div>
+              <span className="text-slate-500 block text-[11px] uppercase font-semibold">Bank name</span>
+              <span className="text-slate-800 dark:text-slate-200 font-medium break-words block mt-0.5">
+                {kyc.bankDetails.bankName || '—'}
+              </span>
+            </div>
+
+            <div>
+              <span className="text-slate-500 block text-[11px] uppercase font-semibold">Branch</span>
+              <span className="text-slate-800 dark:text-slate-200 font-medium break-words block mt-0.5">
+                {kyc.bankDetails.bankBranch || '—'}
+              </span>
+            </div>
+
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
               <DetailRow label="Submitted">{formatDateTime(kyc.reviewInfo?.submittedAt)}</DetailRow>
             </div>

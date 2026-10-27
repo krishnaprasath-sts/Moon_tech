@@ -118,6 +118,25 @@ select:disabled {
   cursor: not-allowed;
 }
 
+/* In-page links (Courses, How it works, FAQ) glide to their section */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Home page scroll reveal (components/home/ScrollReveal.tsx). Only content that starts below
+   the screen gets .reveal-pending, so nothing already visible ever blinks. */
+.reveal-pending {
+  opacity: 0;
+  transform: translateY(18px);
+}
+
+.reveal-pending.reveal-in {
+  opacity: 1;
+  transform: none;
+  transition: opacity 600ms cubic-bezier(0.22, 1, 0.36, 1), transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+
 /* Modal / alert entrance (referenced as `animate-fade-in`) */
 @keyframes moontech-fade-in {
   from {
@@ -194,6 +213,10 @@ select:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
   .animate-fade-in,
   .animate-overlay-in,
   .animate-float,
@@ -218,4 +241,82 @@ input[type="checkbox"]:focus-visible,
 input[type="radio"]:focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 1px;
+}
+
+/* ---- Page changes (components/layout/RouteTransitions.tsx) ----
+   The old page cross-fades into the new one, so there is never a blank frame.
+   These parts carry their own names, so they stay in place or slide instead of fading. */
+.vt-site-header {
+  view-transition-name: site-header;
+}
+
+.vt-auth-header {
+  view-transition-name: auth-header;
+}
+
+.vt-auth-tab {
+  view-transition-name: auth-tab;
+}
+
+::view-transition-old(root) {
+  animation: 160ms cubic-bezier(0.4, 0, 1, 1) both vt-fade-out;
+}
+
+::view-transition-new(root) {
+  animation: 260ms cubic-bezier(0, 0, 0.2, 1) 40ms both vt-fade-in;
+}
+
+@keyframes vt-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes vt-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* The white "active tab" pill slides between Sign In and Create Account */
+::view-transition-group(auth-tab) {
+  animation-duration: 380ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Theme switch, modern browsers: the new theme is revealed as a circle (lib/themeTransition.ts) ---- */
+html.theme-reveal::view-transition-old(root),
+html.theme-reveal::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+html.theme-reveal::view-transition-new(root) {
+  z-index: 2;
+}
+
+/* During the theme circle the whole page is one picture, so named parts must not split off */
+html.theme-reveal .vt-site-header,
+html.theme-reveal .vt-auth-header,
+html.theme-reveal .vt-auth-tab {
+  view-transition-name: none;
+}
+
+/* While the circle grows, colours switch at once inside it (no half-faded mix) */
+html.theme-reveal *,
+html.theme-reveal *::before,
+html.theme-reveal *::after {
+  transition: none !important;
+}
+
+/* Theme switch, other browsers or reduced motion: every colour fades for a moment */
+html.theme-fade,
+html.theme-fade *,
+html.theme-fade *::before,
+html.theme-fade *::after {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow !important;
+  transition-duration: 350ms !important;
+  transition-timing-function: ease !important;
+  transition-delay: 0ms !important;
 }

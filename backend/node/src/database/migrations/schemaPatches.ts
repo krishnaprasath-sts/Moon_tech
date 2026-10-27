@@ -1,9 +1,9 @@
 import { DataTypes, Op } from 'sequelize';
-import { sequelize, Investment, SystemSetting, KycProfile } from '../../models/index.js';
+import { sequelize, Investment, SystemSetting, KycProfile, UserPayoutDetail, Withdrawal } from '../../models/index.js';
 import { decryptData } from '../../utils/encryption.js';
 import { identityHash } from '../../utils/identityHash.js';
 import { logger } from '../../utils/logger.js';
-import { InvestmentStatus, ProfitPayoutMode, RateBasis, WalletBucket, WalletTxnType, WithdrawalSource } from '../../types/index.js';
+import { BankSource, InvestmentStatus, KycStatus, ProfitPayoutMode, RateBasis, WalletBucket, WalletTxnType, WithdrawalSource } from '../../types/index.js';
 import { toPaise, fromPaise } from '../../utils/money.js';
 import { parseDbDate } from '../../utils/dates.js';
 import { calculateProfitPaise } from '../../services/investmentPlanService.js';
@@ -207,6 +207,74 @@ const COLUMN_PATCHES: ColumnPatch[] = [
       'UPDATE profit_credits pc JOIN investments i ON i.id = pc.investment_id SET pc.cycle_no = FLOOR(DATEDIFF(pc.credit_day, DATE(i.start_date)) / 30)',
     ],
   },
+  // Public customer number (MT + 6 digits derived from the user id, so it is unique without a counter)
+  {
+    table: 'customer_profiles',
+    column: 'customer_id',
+    definition: { type: DataTypes.STRING(16), allowNull: true },
+    backfill: [
+      "UPDATE customer_profiles SET customer_id = CONCAT('MT', LPAD(user_id + 100000, 6, '0')) WHERE customer_id IS NULL",
+      'ALTER TABLE customer_profiles ADD UNIQUE INDEX customer_profiles_customer_id (customer_id)',
+    ],
+  },
+  // Bank branch on KYC, saved payout details and the payout snapshot of a withdrawal
+  {
+    table: 'kyc_profiles',
+    column: 'bank_branch',
+    definition: { type: DataTypes.STRING(100), allowNull: true },
+  },
+  {
+    table: 'user_payout_details',
+    column: 'bank_branch',
+    definition: { type: DataTypes.STRING(100), allowNull: true },
+  },
+  {
+    table: 'withdrawals',
+    column: 'payout_bank_branch',
+    definition: { type: DataTypes.STRING(100), allowNull: true },
+  },
+  // Bank name on KYC; bank account fingerprints so accounts can be compared without decrypting;
+  // where the payout account came from (KYC / approved change / self-entered)
+  {
+    table: 'kyc_profiles',
+    column: 'bank_name',
+    definition: { type: DataTypes.STRING(100), allowNull: true },
+  },
+  {
+    table: 'kyc_profiles',
+    column: 'bank_account_hash',
+    definition: { type: DataTypes.STRING(64), allowNull: true },
+  },
+  {
+    table: 'user_payout_details',
+    column: 'account_hash',
+    definition: { type: DataTypes.STRING(64), allowNull: true },
+  },
+  {
+    table: 'user_payout_details',
+    column: 'bank_source',
+    definition: { type: DataTypes.STRING(20), allowNull: true },
+  },
+  {
+    table: 'user_payout_details',
+    column: 'bank_verified_at',
+    definition: { type: DataTypes.DATE, allowNull: true },
+  },
+  {
+    table: 'user_payout_details',
+    column: 'bank_change_request_id',
+    definition: { type: DataTypes.INTEGER, allowNull: true },
+  },
+  {
+    table: 'withdrawals',
+    column: 'payout_account_hash',
+    definition: { type: DataTypes.STRING(64), allowNull: true },
+  },
+  {
+    table: 'withdrawals',
+    column: 'payout_bank_source',
+    definition: { type: DataTypes.STRING(20), allowNull: true },
+  },
 ];
 
 /**
@@ -238,6 +306,34 @@ const COLUMN_CHANGES: ColumnChange[] = [
     definition: { type: DataTypes.DATE, allowNull: true },
     needsChange: (current) => current.allowNull === false,
     reason: 'open-ended investments have no maturity date',
+  },
+  {
+    table: 'investment_plans',
+    column: 'payout_mode',
+    definition: {
+      type: DataTypes.ENUM(...Object.values(ProfitPayoutMode)),
+      allowNull: false,
+      defaultValue: ProfitPayoutMode.AT_MATURITY,
+    },
+    needsChange: (current) =>
+      typeof current.type === 'string' &&
+      current.type.toUpperCase().startsWith('ENUM') &&
+      !current.type.includes(ProfitPayoutMode.MONTHLY),
+    reason: 'support MONTHLY payout mode on investment plans',
+  },
+  {
+    table: 'investments',
+    column: 'payout_mode',
+    definition: {
+      type: DataTypes.ENUM(...Object.values(ProfitPayoutMode)),
+      allowNull: false,
+      defaultValue: ProfitPayoutMode.AT_MATURITY,
+    },
+    needsChange: (current) =>
+      typeof current.type === 'string' &&
+      current.type.toUpperCase().startsWith('ENUM') &&
+      !current.type.includes(ProfitPayoutMode.MONTHLY),
+    reason: 'support MONTHLY payout mode on investments',
   },
 ];
 
@@ -406,4 +502,82 @@ export async function applyDataPatches(): Promise<void> {
   } catch (err) {
     logger.warn(`[DATA] Could not re-state expected profits: ${(err as Error).message}`);
   }
+
+  // 5. Deposit Plan pays monthly on start date anniversary (6% / month, 12 credits in a year)
+  try {
+    const [, meta] = await sequelize.query(
+      `UPDATE investment_plans SET payout_mode = 'MONTHLY', rate_basis = 'PER_MONTH', profit_value = 6,
+       description = 'A one-year plan that earns 6% of your capital every month (72% over the year), paid into your profit wallet once every month on your investment start date at 6:00 AM. Withdraw your profit any time. Your capital returns to your capital wallet at maturity with no fee; you can also close the plan earlier, less the early withdrawal fee.',
+       featured_tagline = '6% monthly profit credited on your start date each month. 1-year term.'
+       WHERE name = 'Deposit Plan'`
+    );
+    const changed = Number((meta as any)?.affectedRows ?? 0);
+    if (changed > 0) logger.info(`[DATA] Updated Deposit Plan to MONTHLY payout mode (affected ${changed} row(s))`);
+  } catch (err) {
+    logger.warn(`[DATA] Could not update Deposit Plan: ${(err as Error).message}`);
+  }
+
+  // 6. Initialize daily referral commission setting (default: 0.025% per day = 0.5% / month)
+  try {
+    const row = await SystemSetting.findByPk('daily_referral_commission_percent');
+    if (!row) {
+      await SystemSetting.create({
+        setting_key: 'daily_referral_commission_percent',
+        setting_value: '0.025',
+        updated_by: null,
+      });
+      logger.info('[DATA] Initialized default daily_referral_commission_percent = 0.025%');
+    }
+  } catch (err) {
+    logger.warn(`[DATA] Could not init daily_referral_commission_percent: ${(err as Error).message}`);
+  }
+
+  // 7. Bank account fingerprints for records created before the columns existed, and the
+  //    source of every saved payout account (KYC when it is the KYC account, else self-entered)
+  try {
+    const fingerprint = (encrypted: string | null | undefined) => {
+      if (!encrypted) return null;
+      const plain = decryptData(encrypted);
+      return plain ? identityHash(plain) : null;
+    };
+
+    const kycs = await KycProfile.findAll({
+      where: { bank_account_hash: null, bank_account_number_encrypted: { [Op.ne]: null } },
+    });
+    for (const kyc of kycs) {
+      const hash = fingerprint(kyc.bank_account_number_encrypted);
+      if (hash) await kyc.update({ bank_account_hash: hash }, { hooks: false });
+    }
+
+    const payouts = await UserPayoutDetail.findAll({
+      where: { [Op.or]: [{ account_hash: null }, { bank_source: null }], account_number_encrypted: { [Op.ne]: null } },
+    });
+    for (const payout of payouts) {
+      const hash = payout.account_hash || fingerprint(payout.account_number_encrypted);
+      const updates: Record<string, unknown> = { account_hash: hash };
+      if (!payout.bank_source) {
+        const kyc = await KycProfile.findOne({ where: { user_id: payout.user_id } });
+        const sameAsKyc = Boolean(hash && kyc?.bank_account_hash === hash && kyc?.ifsc_code === payout.ifsc_code);
+        updates.bank_source = sameAsKyc ? BankSource.KYC : BankSource.CUSTOMER;
+        if (sameAsKyc && kyc?.kyc_status === KycStatus.VERIFIED) updates.bank_verified_at = kyc.reviewed_at || new Date();
+        if (!payout.bank_name && sameAsKyc && kyc?.bank_name) updates.bank_name = kyc.bank_name;
+      }
+      await payout.update(updates, { hooks: false });
+    }
+
+    const withdrawals = await Withdrawal.findAll({
+      where: { payout_account_hash: null, payout_account_number_encrypted: { [Op.ne]: null } },
+      attributes: ['id', 'payout_account_number_encrypted'],
+    });
+    for (const w of withdrawals) {
+      const hash = fingerprint(w.payout_account_number_encrypted);
+      if (hash) await w.update({ payout_account_hash: hash }, { hooks: false });
+    }
+
+    const total = kycs.length + payouts.length + withdrawals.length;
+    if (total > 0) logger.info(`[DATA] Filled bank account fingerprints on ${total} record(s)`);
+  } catch (err) {
+    logger.warn(`[DATA] Could not fill bank account fingerprints: ${(err as Error).message}`);
+  }
 }
+
